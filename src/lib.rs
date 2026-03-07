@@ -377,6 +377,8 @@ pub(crate) mod webkitgtk;
 pub use raw_window_handle;
 use raw_window_handle::HasWindowHandle;
 #[cfg(gtk)]
+use webkit6::{gtk, gtk::prelude::*};
+#[cfg(gtk)]
 use webkitgtk::*;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -1949,7 +1951,7 @@ pub trait WebViewBuilderExtUnix<'a> {
   /// - Panics if [`gtk::init`] was not called in this thread.
   fn build_gtk<W>(self, widget: &'a W) -> Result<WebView>
   where
-    W: gtk::prelude::IsA<gtk::Container>;
+    W: IsA<gtk::Widget>;
 
   /// Set the path from which to load extensions from.
   fn with_extensions_path(self, path: impl Into<PathBuf>) -> Self;
@@ -1969,7 +1971,7 @@ pub trait WebViewBuilderExtUnix<'a> {
 impl<'a> WebViewBuilderExtUnix<'a> for WebViewBuilder<'a> {
   fn build_gtk<W>(self, widget: &'a W) -> Result<WebView>
   where
-    W: gtk::prelude::IsA<gtk::Container>,
+    W: IsA<gtk::Widget>,
   {
     self.error?;
 
@@ -2357,7 +2359,7 @@ pub trait WebViewExtUnix: Sized {
   /// - Panics if [`gtk::init`] was not called in this thread.
   fn new_gtk<W>(widget: &W) -> Result<Self>
   where
-    W: gtk::prelude::IsA<gtk::Container>;
+    W: IsA<gtk::Widget>;
 
   /// Returns Webkit2gtk Webview handle
   fn webview(&self) -> webkit6::WebView;
@@ -2365,14 +2367,14 @@ pub trait WebViewExtUnix: Sized {
   /// Attaches this webview to the given Widget and removes it from the current one.
   fn reparent<W>(&self, widget: &W) -> Result<()>
   where
-    W: gtk::prelude::IsA<gtk::Container>;
+    W: IsA<gtk::Widget>;
 }
 
 #[cfg(gtk)]
 impl WebViewExtUnix for WebView {
   fn new_gtk<W>(widget: &W) -> Result<Self>
   where
-    W: gtk::prelude::IsA<gtk::Container>,
+    W: IsA<gtk::Widget>,
   {
     WebViewBuilder::new().build_gtk(widget)
   }
@@ -2383,7 +2385,7 @@ impl WebViewExtUnix for WebView {
 
   fn reparent<W>(&self, widget: &W) -> Result<()>
   where
-    W: gtk::prelude::IsA<gtk::Container>,
+    W: IsA<gtk::Widget>,
   {
     self.webview.reparent(widget)
   }

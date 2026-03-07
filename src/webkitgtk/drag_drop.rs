@@ -8,7 +8,7 @@ use std::{
   rc::Rc,
 };
 
-use webkit6::{glib, gtk, gtk::prelude::*, WebView};
+use webkit6::{glib, gtk::prelude::*, WebView};
 
 use crate::DragDropEvent;
 

@@ -12,7 +12,12 @@ use std::{
   rc::Rc,
   sync::{Arc, Mutex},
 };
-use webkit6::{gdk, gio, glib, gtk, gtk::prelude::*, prelude::*, soup};
+use webkit6::{
+  gdk, gio, glib, gtk, gtk::prelude::*, prelude::*, soup, AutoplayPolicy, LoadEvent,
+  NavigationPolicyDecision, NetworkProxyMode, NetworkProxySettings, PolicyDecisionType, URIRequest,
+  UserContentInjectedFrames, UserContentManager, UserScript, UserScriptInjectionTime, WebView,
+  WebsitePolicies,
+};
 
 pub use web_context::WebContextImpl;
 
@@ -45,13 +50,29 @@ impl Drop for InnerWebView {
 }
 
 impl InnerWebView {
+  pub fn new(
+    _window: &impl HasWindowHandle,
+    _attributes: WebViewAttributes,
+    _pl_attrs: super::PlatformSpecificWebViewAttributes,
+  ) -> Result<Self> {
+    Err(Error::UnsupportedWindowHandle)
+  }
+
+  pub fn new_as_child(
+    _window: &impl HasWindowHandle,
+    _attributes: WebViewAttributes,
+    _pl_attrs: super::PlatformSpecificWebViewAttributes,
+  ) -> Result<Self> {
+    Err(Error::UnsupportedWindowHandle)
+  }
+
   pub fn new_gtk<W>(
     container: &W,
     mut attributes: WebViewAttributes,
     pl_attrs: super::PlatformSpecificWebViewAttributes,
   ) -> Result<Self>
   where
-    W: IsA<gtk::Container>,
+    W: IsA<gtk::Widget>,
   {
     // default_context allows us to create a scoped context on-demand
     let mut default_context;
@@ -351,15 +372,11 @@ impl InnerWebView {
             if let Some(uri_req) = nav_action.request() {
               if let Some(uri) = uri_req.uri() {
                 let allow = handler(uri.to_string());
-                let pointer = policy_decision.as_ptr();
-                unsafe {
-                  if allow {
-                    webkit_policy_decision_use(pointer)
-                  } else {
-                    webkit_policy_decision_ignore(pointer)
-                  }
+                if allow {
+                  policy_decision.use_();
+                } else {
+                  policy_decision.ignore();
                 }
-
                 return true;
               }
             }
@@ -383,7 +400,7 @@ impl InnerWebView {
 
   fn add_to_container<W>(webview: &WebView, container: &W, attributes: &WebViewAttributes) -> bool
   where
-    W: IsA<gtk::Container>,
+    W: IsA<gtk::Widget>,
   {
     let mut is_in_fixed_parent = false;
 
@@ -397,14 +414,14 @@ impl InnerWebView {
       let scale_factor = webview.scale_factor() as f64;
       let (width, height) = attributes
         .bounds
-        .map(|b| b.size.to_logical::<i32>(scale_factor))
+        .map(|b| b.size.to_logical(scale_factor))
         .map(Into::into)
         .unwrap_or((1, 1));
       let (x, y) = attributes
         .bounds
-        .map(|b| b.position.to_logical::<i32>(scale_factor))
+        .map(|b| b.position.to_logical(scale_factor))
         .map(Into::into)
-        .unwrap_or((0, 0));
+        .unwrap_or((0., 0.));
 
       webview.set_size_request(width, height);
 
@@ -629,7 +646,7 @@ impl InnerWebView {
     if self.is_in_fixed_parent {
       self
         .webview
-        .size_allocate(&gtk::Allocation::new(x, y, width, height));
+        .size_allocate(&gtk::Allocation::new(x, y, width, height), -1);
     }
 
     Ok(())
@@ -713,7 +730,7 @@ impl InnerWebView {
     );
 
     if let Some(dt) = cookie.expires_datetime() {
-      soup_cookie.set_expires(&gtk::DateTime::from_unix_utc(dt.unix_timestamp()).unwrap());
+      soup_cookie.set_expires(&glib::DateTime::from_unix_utc(dt.unix_timestamp()).unwrap());
     }
 
     if let Some(http_only) = cookie.http_only() {
@@ -753,9 +770,9 @@ impl InnerWebView {
       })
     }
 
+    let context = glib::MainContext::default();
     loop {
-      gtk::main_iteration();
-
+      context.iteration(true);
       if let Ok(response) = rx.try_recv() {
         return response.map_err(Into::into);
       }
@@ -780,9 +797,9 @@ impl InnerWebView {
       })
     }
 
+    let context = glib::MainContext::default();
     loop {
-      gtk::main_iteration();
-
+      context.iteration(true);
       if let Ok(response) = rx.try_recv() {
         return response.map_err(Into::into);
       }
@@ -802,9 +819,9 @@ impl InnerWebView {
       });
     }
 
+    let context = glib::MainContext::default();
     loop {
-      gtk::main_iteration();
-
+      context.iteration(true);
       if let Ok(response) = rx.try_recv() {
         return response.map_err(Into::into);
       }
@@ -824,9 +841,9 @@ impl InnerWebView {
       });
     }
 
+    let context = glib::MainContext::default();
     loop {
-      gtk::main_iteration();
-
+      context.iteration(true);
       if let Ok(response) = rx.try_recv() {
         return response.map_err(Into::into);
       }
@@ -835,12 +852,12 @@ impl InnerWebView {
 
   pub fn reparent<W>(&self, container: &W) -> Result<()>
   where
-    W: IsA<gtk::Container>,
+    W: IsA<gtk::Widget>,
   {
     if let Some(parent) = self
       .webview
       .parent()
-      .and_then(|p| p.dynamic_cast::<gtk::Container>().ok())
+      .and_then(|p| p.dynamic_cast::<gtk::Widget>().ok())
     {
       parent.remove(&self.webview);
 
@@ -854,7 +871,7 @@ impl InnerWebView {
         container
           .dynamic_cast_ref::<gtk::Fixed>()
           .unwrap()
-          .put(&self.webview, 0, 0);
+          .put(&self.webview, 0., 0.);
       } else {
         container.add(&self.webview);
       }
@@ -867,9 +884,9 @@ impl InnerWebView {
 pub fn platform_webview_version() -> Result<String> {
   let (major, minor, patch) = unsafe {
     (
-      webkit_get_major_version(),
-      webkit_get_minor_version(),
-      webkit_get_micro_version(),
+      webkit6::functions::major_version(),
+      webkit6::functions::minor_version(),
+      webkit6::functions::micro_version(),
     )
   };
   Ok(format!("{major}.{minor}.{patch}"))
