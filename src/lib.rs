@@ -478,7 +478,7 @@ pub enum NewWindowResponse {
       target_os = "netbsd",
       target_os = "openbsd",
     ))]
-    webview: webkit2gtk::WebView,
+    webview: webkit6::WebView,
     #[cfg(windows)]
     webview: ICoreWebView2,
     #[cfg(target_os = "macos")]
@@ -501,7 +501,7 @@ pub struct NewWindowOpener {
     target_os = "netbsd",
     target_os = "openbsd",
   ))]
-  pub webview: webkit2gtk::WebView,
+  pub webview: webkit6::WebView,
   /// The instance of the webview that initiated the new window request.
   #[cfg(windows)]
   pub webview: ICoreWebView2,
@@ -1926,7 +1926,7 @@ impl WebViewBuilderExtAndroid for WebViewBuilder<'_> {
 #[derive(Default)]
 pub(crate) struct PlatformSpecificWebViewAttributes {
   extension_path: Option<PathBuf>,
-  related_view: Option<webkit2gtk::WebView>,
+  related_view: Option<webkit6::WebView>,
 }
 
 #[cfg(any(
@@ -1956,7 +1956,7 @@ pub trait WebViewBuilderExtUnix<'a> {
 
   /// Creates a new webview sharing the same web process with the provided webview.
   /// Useful if you need to link a webview to another, for instance when using the [`WebViewBuilder::with_new_window_req_handler`].
-  fn with_related_view(self, webview: webkit2gtk::WebView) -> Self;
+  fn with_related_view(self, webview: webkit6::WebView) -> Self;
 }
 
 #[cfg(any(
@@ -1982,7 +1982,7 @@ impl<'a> WebViewBuilderExtUnix<'a> for WebViewBuilder<'a> {
     self
   }
 
-  fn with_related_view(mut self, webview: webkit2gtk::WebView) -> Self {
+  fn with_related_view(mut self, webview: webkit6::WebView) -> Self {
     self.platform_specific.related_view.replace(webview);
     self
   }
@@ -2360,7 +2360,7 @@ pub trait WebViewExtUnix: Sized {
     W: gtk::prelude::IsA<gtk::Container>;
 
   /// Returns Webkit2gtk Webview handle
-  fn webview(&self) -> webkit2gtk::WebView;
+  fn webview(&self) -> webkit6::WebView;
 
   /// Attaches this webview to the given Widget and removes it from the current one.
   fn reparent<W>(&self, widget: &W) -> Result<()>
@@ -2377,7 +2377,7 @@ impl WebViewExtUnix for WebView {
     WebViewBuilder::new().build_gtk(widget)
   }
 
-  fn webview(&self) -> webkit2gtk::WebView {
+  fn webview(&self) -> webkit6::WebView {
     self.webview.webview.clone()
   }
 

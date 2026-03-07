@@ -24,23 +24,16 @@ targets = [
 ]
 
 [features]
-default = ["drag-drop", "protocol", "os-webview", "x11"]
+default = ["drag-drop", "protocol", "os-webview"]
 serde = ["dpi/serde"]
 drag-drop = []
 protocol = []
 devtools = []
 transparent = []
 fullscreen = []
-linux-body = ["webkit2gtk/v2_40", "os-webview"]
+linux-body = ["os-webview"]
 mac-proxy = []
-os-webview = [
-  "javascriptcore-rs",
-  "webkit2gtk",
-  "webkit2gtk-sys",
-  "dep:gtk",
-  "soup3",
-]
-x11 = ["x11-dl", "gdkx11", "tao/x11"]
+os-webview = ["webkit6"]
 tracing = ["dep:tracing"]
 
 [dependencies]
@@ -53,20 +46,9 @@ dpi = "0.1"
 cookie = "0.18"
 
 [target."cfg(any(target_os = \"linux\", target_os = \"dragonfly\", target_os = \"freebsd\", target_os = \"openbsd\", target_os = \"netbsd\"))".dependencies]
-javascriptcore-rs = { version = "=1.1.2", features = [
-  "v2_28",
-], optional = true }
-webkit2gtk = { version = "=2.0.2", features = ["v2_38"], optional = true }
-webkit2gtk-sys = { version = "=2.0.2", optional = true }
-gtk = { version = "0.18", optional = true }
-soup3 = { version = "0.5", optional = true }
-x11-dl = { version = "2.21", optional = true }
-gdkx11 = { version = "0.18", optional = true }
+webkit6 = { version = "0.5", optional = true }
 percent-encoding = "2.3"
 dirs = "6"
-
-[target."cfg(any(target_os = \"linux\", target_os = \"dragonfly\", target_os = \"freebsd\", target_os = \"openbsd\", target_os = \"netbsd\"))".dev-dependencies]
-x11-dl = { version = "2.21" }
 
 [target."cfg(target_os = \"windows\")".dependencies]
 webview2-com = "0.38"
@@ -205,9 +187,8 @@ dom_query = { version = "0.25.1", default-features = false }
 
 [dev-dependencies]
 pollster = "0.4.0"
-tao = "0.34"
 wgpu = "23"
-winit = "0.30"
+winit = { git = "https://github.com/Charlie-XIAO/winit.git", branch = "patches/v0.30.x/glib", features = ["glib"] }
 getrandom = "0.3"
 http-range = "0.1"
 percent-encoding = "2.3"

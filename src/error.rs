@@ -7,19 +7,16 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
   #[cfg(gtk)]
   #[error(transparent)]
-  GlibError(#[from] gtk::glib::Error),
+  GlibError(#[from] webkit6::glib::Error),
   #[cfg(gtk)]
   #[error(transparent)]
-  GlibBoolError(#[from] gtk::glib::BoolError),
+  GlibBoolError(#[from] webkit6::glib::BoolError),
   #[cfg(gtk)]
   #[error("Fail to fetch security manager")]
   MissingManager,
   #[cfg(gtk)]
   #[error("Couldn't find X11 Display")]
   X11DisplayNotFound,
-  #[cfg(all(gtk, feature = "x11"))]
-  #[error(transparent)]
-  XlibError(#[from] x11_dl::error::OpenError),
   #[error("Failed to initialize the script")]
   InitScriptError,
   #[error("Bad RPC request: {0} ((1))")]

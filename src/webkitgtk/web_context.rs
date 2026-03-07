@@ -5,9 +5,7 @@
 //! Unix platform extensions for [`WebContext`](super::WebContext).
 
 use crate::{Error, RequestAsyncResponder};
-use gtk::glib::{self, MainContext, ObjectExt};
 use http::{header::CONTENT_TYPE, HeaderName, HeaderValue, Request, Response as HttpResponse};
-use soup::{MessageHeaders, MessageHeadersType};
 use std::{
   borrow::Cow,
   cell::RefCell,
@@ -15,10 +13,9 @@ use std::{
   path::{Path, PathBuf},
   rc::Rc,
 };
-use webkit2gtk::{
-  ApplicationInfo, AutomationSessionExt, CookiePersistentStorage, DownloadExt, SecurityManagerExt,
-  URIRequest, URIRequestExt, URISchemeRequest, URISchemeRequestExt, URISchemeResponse,
-  URISchemeResponseExt, WebContext, WebContextExt as Webkit2gtkContextExt, WebView, WebViewExt,
+use webkit6::{
+  gio, glib, gtk::prelude::*, prelude::*, soup, ApplicationInfo, CookiePersistentStorage,
+  URIRequest, URISchemeRequest, URISchemeResponse, WebContext, WebView, WebsiteDataManager,
 };
 
 #[derive(Debug)]
@@ -30,7 +27,6 @@ pub struct WebContextImpl {
 
 impl WebContextImpl {
   pub fn new(data_directory: Option<&Path>) -> Self {
-    use webkit2gtk::{CookieManagerExt, WebsiteDataManager, WebsiteDataManagerExt};
     let mut context_builder = WebContext::builder();
     if let Some(data_directory) = data_directory {
       let data_manager = WebsiteDataManager::builder()
@@ -175,10 +171,8 @@ impl WebContextExt for super::WebContext {
         let body;
         #[cfg(feature = "linux-body")]
         {
-          use gtk::{gdk::prelude::InputStreamExtManual, gio::Cancellable};
-
           // Set request http body
-          let cancellable: Option<&Cancellable> = None;
+          let cancellable: Option<&gio::Cancellable> = None;
           body = request
             .http_body()
             .map(|s| {
@@ -207,7 +201,7 @@ impl WebContextExt for super::WebContext {
         let http_request = match http_request.body(body) {
           Ok(req) => req,
           Err(_) => {
-            request.finish_error(&mut gtk::glib::Error::new(
+            request.finish_error(&mut glib::Error::new(
               glib::UriError::Failed,
               "Internal server error: could not create request.",
             ));
@@ -218,9 +212,9 @@ impl WebContextExt for super::WebContext {
         let request_ = MainThreadRequest(request.clone());
         let responder: Box<dyn FnOnce(HttpResponse<Cow<'static, [u8]>>)> =
           Box::new(move |http_response| {
-            MainContext::default().invoke(move || {
+            glib::MainContext::default().invoke(move || {
               let buffer = http_response.body();
-              let input = gtk::gio::MemoryInputStream::from_bytes(&gtk::glib::Bytes::from(buffer));
+              let input = gio::MemoryInputStream::from_bytes(&glib::Bytes::from(buffer));
               let content_type = http_response
                 .headers()
                 .get(CONTENT_TYPE)
@@ -232,7 +226,7 @@ impl WebContextExt for super::WebContext {
                 response.set_content_type(content_type);
               }
 
-              let headers = MessageHeaders::new(MessageHeadersType::Response);
+              let headers = soup::MessageHeaders::new(soup::MessageHeadersType::Response);
               for (name, value) in http_response.headers().into_iter() {
                 headers.append(name.as_str(), value.to_str().unwrap_or(""));
               }

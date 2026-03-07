@@ -8,8 +8,7 @@ use std::{
   rc::Rc,
 };
 
-use gtk::{glib::GString, prelude::*};
-use webkit2gtk::WebView;
+use webkit6::{glib, gtk, gtk::prelude::*, WebView};
 
 use crate::DragDropEvent;
 
@@ -123,7 +122,7 @@ pub(crate) fn connect_drag_event(webview: &WebView, handler: Box<dyn Fn(DragDrop
     if controller.state() != DragControllerState::Left {
       controller.leaving();
       let controller = controller.clone();
-      gtk::glib::idle_add_local_once(move || {
+      glib::idle_add_local_once(move || {
         if controller.state() == DragControllerState::Leaving {
           controller.leave();
           controller.call(DragDropEvent::Leave);
@@ -133,7 +132,7 @@ pub(crate) fn connect_drag_event(webview: &WebView, handler: Box<dyn Fn(DragDrop
   });
 }
 
-fn path_buf_from_uri(gstr: &GString) -> PathBuf {
+fn path_buf_from_uri(gstr: &glib::GString) -> PathBuf {
   let path = gstr.as_str();
   let path = path.strip_prefix("file://").unwrap_or(path);
   let path = percent_encoding::percent_decode(path.as_bytes())

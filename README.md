@@ -114,7 +114,7 @@ let builder = WebViewBuilder::new()
 let webview = builder.build_as_child(&window).unwrap();
 #[cfg(target_os = "linux")]
 let webview = {
-  # use gtk::prelude::*;
+  use gtk::prelude::*;
   let vbox = window.default_vbox().unwrap(); // tao adds a gtk::Box by default
   let fixed = gtk::Fixed::new();
   fixed.show_all();
@@ -178,7 +178,7 @@ sudo pacman -S webkit2gtk-4.1
 ###### Debian / Ubuntu:
 
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev
+sudo apt install libwebkitgtk-6.0-dev
 ```
 
 ###### Fedora
