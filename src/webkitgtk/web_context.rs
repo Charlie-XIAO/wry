@@ -14,46 +14,32 @@ use std::{
   rc::Rc,
 };
 use webkit6::{
-  gio, glib, gtk::prelude::*, prelude::*, soup, ApplicationInfo, CookiePersistentStorage,
-  URIRequest, URISchemeRequest, URISchemeResponse, WebContext, WebView, WebsiteDataManager,
+  gio, glib, gtk::prelude::*, prelude::*, soup, ApplicationInfo, NetworkSession, URIRequest,
+  URISchemeRequest, URISchemeResponse, WebContext, WebView,
 };
 
 #[derive(Debug)]
 pub struct WebContextImpl {
   context: WebContext,
+  network_session: NetworkSession,
   automation: bool,
-  app_info: Option<ApplicationInfo>,
+  app_info: ApplicationInfo,
 }
 
 impl WebContextImpl {
   pub fn new(data_directory: Option<&Path>) -> Self {
-    let mut context_builder = WebContext::builder();
-    if let Some(data_directory) = data_directory {
-      let data_manager = WebsiteDataManager::builder()
-        // TODO: Consider taking a cache_directory so this can be in XDG_CACHE_HOME.
-        .base_cache_directory(data_directory.to_string_lossy())
-        .base_data_directory(data_directory.to_string_lossy())
-        .build();
-      if let Some(cookie_manager) = data_manager.cookie_manager() {
-        cookie_manager.set_persistent_storage(
-          &data_directory.join("cookies").to_string_lossy(),
-          CookiePersistentStorage::Text,
-        );
-      }
-      context_builder = context_builder.website_data_manager(&data_manager);
-    }
-    let context = context_builder.build();
+    let context = WebContext::new();
 
-    Self::create_context(context)
-  }
+    let network_session = if let Some(data_directory) = data_directory {
+      let cache_directory = data_directory.join("cache");
+      NetworkSession::new(
+        Some(&data_directory.to_string_lossy()),
+        Some(&cache_directory.to_string_lossy()),
+      )
+    } else {
+      NetworkSession::new_ephemeral()
+    };
 
-  pub fn new_ephemeral() -> Self {
-    let context = WebContext::new_ephemeral();
-
-    Self::create_context(context)
-  }
-
-  pub fn create_context(context: WebContext) -> Self {
     let automation = false;
     context.set_automation_allowed(automation);
 
@@ -74,9 +60,14 @@ impl WebContextImpl {
 
     Self {
       context,
+      network_session,
       automation,
-      app_info: Some(app_info),
+      app_info,
     }
+  }
+
+  pub fn new_ephemeral() -> Self {
+    Self::new(None)
   }
 
   pub fn set_allows_automation(&mut self, flag: bool) {
@@ -87,7 +78,7 @@ impl WebContextImpl {
   pub fn set_web_extensions_directory(&mut self, path: &Path) {
     self
       .context
-      .set_web_extensions_directory(&path.to_string_lossy());
+      .set_web_process_extensions_directory(&path.to_string_lossy());
   }
 }
 
@@ -95,6 +86,9 @@ impl WebContextImpl {
 pub trait WebContextExt {
   /// The GTK [`WebContext`] of all webviews in the context.
   fn context(&self) -> &WebContext;
+
+  /// The GTK [`NetworkSession`] of all webviews in the context.
+  fn network_session(&self) -> &NetworkSession;
 
   /// Register a custom protocol to the web context.
   fn register_uri_scheme<F>(&mut self, name: &str, handler: F) -> crate::Result<()>
@@ -109,7 +103,7 @@ pub trait WebContextExt {
   /// **Note:** `libwebkit2gtk` only allows 1 automation context at a time.
   fn allows_automation(&self) -> bool;
 
-  fn register_automation(&mut self, webview: WebView);
+  fn register_automation(&self, webview: WebView);
 
   fn register_download_handler(
     &mut self,
@@ -121,6 +115,10 @@ pub trait WebContextExt {
 impl WebContextExt for super::WebContext {
   fn context(&self) -> &WebContext {
     &self.os.context
+  }
+
+  fn network_session(&self) -> &NetworkSession {
+    &self.os.network_session
   }
 
   fn register_uri_scheme<F>(&mut self, name: &str, handler: F) -> crate::Result<()>
@@ -259,9 +257,9 @@ impl WebContextExt for super::WebContext {
 
   fn load_uri(&self, webview: WebView, uri: String, headers: Option<http::HeaderMap>) {
     if let Some(headers) = headers {
-      let req = URIRequest::builder().uri(&uri).build();
+      let req = URIRequest::new(&uri);
 
-      if let Some(ref mut req_headers) = req.http_headers() {
+      if let Some(req_headers) = req.http_headers() {
         for (header, value) in headers.iter() {
           req_headers.append(
             header.to_string().as_str(),
@@ -280,22 +278,25 @@ impl WebContextExt for super::WebContext {
     self.os.automation
   }
 
-  fn register_automation(&mut self, webview: WebView) {
-    if let (true, Some(app_info)) = (self.os.automation, self.os.app_info.take()) {
-      self.os.context.connect_automation_started(move |_, auto| {
-        let webview = webview.clone();
-        auto.set_application_info(&app_info);
-
-        // We do **NOT** support arbitrarily creating new webviews.
-        // To support this in the future, we would need a way to specify the
-        // default WindowBuilder to use to create the window it will use, and
-        // possibly "default" webview attributes. Difficulty comes in for controlling
-        // the owned Window that would need to be used.
-        //
-        // Instead, we just pass the first created webview.
-        auto.connect_create_web_view(None, move |_| webview.clone());
-      });
+  fn register_automation(&self, webview: WebView) {
+    if !self.os.automation {
+      return;
     }
+
+    let app_info = self.os.app_info.clone();
+    self.os.context.connect_automation_started(move |_, auto| {
+      let webview = webview.clone();
+      auto.set_application_info(&app_info);
+
+      // We do **NOT** support arbitrarily creating new webviews.
+      // To support this in the future, we would need a way to specify the
+      // default WindowBuilder to use to create the window it will use, and
+      // possibly "default" webview attributes. Difficulty comes in for controlling
+      // the owned Window that would need to be used.
+      //
+      // Instead, we just pass the first created webview.
+      auto.connect_create_web_view(None, move |_| webview.clone());
+    });
   }
 
   fn register_download_handler(
@@ -303,12 +304,12 @@ impl WebContextExt for super::WebContext {
     download_started_handler: Option<Box<dyn FnMut(String, &mut PathBuf) -> bool>>,
     download_completed_handler: Option<Rc<dyn Fn(String, Option<PathBuf>, bool) + 'static>>,
   ) {
-    let context = &self.os.context;
+    let network_session = &self.os.network_session;
 
     let download_started_handler = Rc::new(RefCell::new(download_started_handler));
     let failed = Rc::new(RefCell::new(false));
 
-    context.connect_download_started(move |_context, download| {
+    network_session.connect_download_started(move |_session, download| {
       let download_started_handler = download_started_handler.clone();
       download.connect_decide_destination(move |download, suggested_filename| {
         if let Some(uri) = download.request().and_then(|req| req.uri()) {
