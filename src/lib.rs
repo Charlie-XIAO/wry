@@ -377,8 +377,6 @@ pub(crate) mod webkitgtk;
 pub use raw_window_handle;
 use raw_window_handle::HasWindowHandle;
 #[cfg(gtk)]
-use webkit6::{gtk, gtk::prelude::*};
-#[cfg(gtk)]
 use webkitgtk::*;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -480,7 +478,7 @@ pub enum NewWindowResponse {
       target_os = "netbsd",
       target_os = "openbsd",
     ))]
-    webview: webkit6::WebView,
+    webview: webkit::WebView,
     #[cfg(windows)]
     webview: ICoreWebView2,
     #[cfg(target_os = "macos")]
@@ -503,7 +501,7 @@ pub struct NewWindowOpener {
     target_os = "netbsd",
     target_os = "openbsd",
   ))]
-  pub webview: webkit6::WebView,
+  pub webview: webkit::WebView,
   /// The instance of the webview that initiated the new window request.
   #[cfg(windows)]
   pub webview: ICoreWebView2,
@@ -1928,7 +1926,7 @@ impl WebViewBuilderExtAndroid for WebViewBuilder<'_> {
 #[derive(Default)]
 pub(crate) struct PlatformSpecificWebViewAttributes {
   extension_path: Option<PathBuf>,
-  related_view: Option<webkit6::WebView>,
+  related_view: Option<webkit::WebView>,
 }
 
 #[cfg(any(
@@ -1951,14 +1949,14 @@ pub trait WebViewBuilderExtUnix<'a> {
   /// - Panics if [`gtk::init`] was not called in this thread.
   fn build_gtk<W>(self, widget: &'a W) -> Result<WebView>
   where
-    W: IsA<gtk::Widget>;
+    W: gtk::prelude::IsA<gtk::Widget>;
 
   /// Set the path from which to load extensions from.
   fn with_extensions_path(self, path: impl Into<PathBuf>) -> Self;
 
   /// Creates a new webview sharing the same web process with the provided webview.
   /// Useful if you need to link a webview to another, for instance when using the [`WebViewBuilder::with_new_window_req_handler`].
-  fn with_related_view(self, webview: webkit6::WebView) -> Self;
+  fn with_related_view(self, webview: webkit::WebView) -> Self;
 }
 
 #[cfg(any(
@@ -1971,7 +1969,7 @@ pub trait WebViewBuilderExtUnix<'a> {
 impl<'a> WebViewBuilderExtUnix<'a> for WebViewBuilder<'a> {
   fn build_gtk<W>(self, widget: &'a W) -> Result<WebView>
   where
-    W: IsA<gtk::Widget>,
+    W: gtk::prelude::IsA<gtk::Widget>,
   {
     self.error?;
 
@@ -1984,7 +1982,7 @@ impl<'a> WebViewBuilderExtUnix<'a> for WebViewBuilder<'a> {
     self
   }
 
-  fn with_related_view(mut self, webview: webkit6::WebView) -> Self {
+  fn with_related_view(mut self, webview: webkit::WebView) -> Self {
     self.platform_specific.related_view.replace(webview);
     self
   }
@@ -2359,33 +2357,33 @@ pub trait WebViewExtUnix: Sized {
   /// - Panics if [`gtk::init`] was not called in this thread.
   fn new_gtk<W>(widget: &W) -> Result<Self>
   where
-    W: IsA<gtk::Widget>;
+    W: gtk::prelude::IsA<gtk::Widget>;
 
   /// Returns Webkit2gtk Webview handle
-  fn webview(&self) -> webkit6::WebView;
+  fn webview(&self) -> webkit::WebView;
 
   /// Attaches this webview to the given Widget and removes it from the current one.
   fn reparent<W>(&self, widget: &W) -> Result<()>
   where
-    W: IsA<gtk::Widget>;
+    W: gtk::prelude::IsA<gtk::Widget>;
 }
 
 #[cfg(gtk)]
 impl WebViewExtUnix for WebView {
   fn new_gtk<W>(widget: &W) -> Result<Self>
   where
-    W: IsA<gtk::Widget>,
+    W: gtk::prelude::IsA<gtk::Widget>,
   {
     WebViewBuilder::new().build_gtk(widget)
   }
 
-  fn webview(&self) -> webkit6::WebView {
+  fn webview(&self) -> webkit::WebView {
     self.webview.webview.clone()
   }
 
   fn reparent<W>(&self, widget: &W) -> Result<()>
   where
-    W: IsA<gtk::Widget>,
+    W: gtk::prelude::IsA<gtk::Widget>,
   {
     self.webview.reparent(widget)
   }

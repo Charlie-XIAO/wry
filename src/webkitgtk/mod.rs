@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 use dpi::LogicalSize;
+use gtk::{gdk, gio, glib, prelude::*};
 use http::Request;
 use raw_window_handle::HasWindowHandle;
 #[cfg(any(debug_assertions, feature = "devtools"))]
@@ -12,10 +13,10 @@ use std::{
   rc::Rc,
   sync::{Arc, Mutex},
 };
-use webkit6::{
-  gdk, gio, glib, gtk, gtk::prelude::*, prelude::*, soup, AutoplayPolicy, LoadEvent,
-  NavigationPolicyDecision, NetworkProxyMode, NetworkProxySettings, PolicyDecisionType, URIRequest,
-  UserContentInjectedFrames, UserContentManager, UserScript, UserScriptInjectionTime, WebView,
+use webkit::{
+  prelude::*, soup, AutoplayPolicy, LoadEvent, NavigationPolicyDecision, NetworkProxyMode,
+  NetworkProxySettings, PolicyDecisionType, PrintOperation, URIRequest, UserContentInjectedFrames,
+  UserContentManager, UserScript, UserScriptInjectionTime, WebView, WebsiteDataTypes,
   WebsitePolicies,
 };
 
@@ -488,7 +489,7 @@ impl InnerWebView {
   }
 
   pub fn print(&self) -> Result<()> {
-    let print = webkit6::PrintOperation::new(&self.webview);
+    let print = PrintOperation::new(&self.webview);
     print.run_dialog(None::<&gtk::Window>);
     Ok(())
   }
@@ -618,7 +619,7 @@ impl InnerWebView {
     if let Some(context) = self.webview.context() {
       if let Some(data_manger) = context.website_data_manager() {
         data_manger.clear(
-          webkit6::WebsiteDataTypes::ALL,
+          WebsiteDataTypes::ALL,
           glib::TimeSpan::from_seconds(0),
           None::<&gio::Cancellable>,
           |_| {},
@@ -884,9 +885,9 @@ impl InnerWebView {
 pub fn platform_webview_version() -> Result<String> {
   let (major, minor, patch) = unsafe {
     (
-      webkit6::functions::major_version(),
-      webkit6::functions::minor_version(),
-      webkit6::functions::micro_version(),
+      webkit::functions::major_version(),
+      webkit::functions::minor_version(),
+      webkit::functions::micro_version(),
     )
   };
   Ok(format!("{major}.{minor}.{patch}"))

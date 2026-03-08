@@ -5,6 +5,7 @@
 //! Unix platform extensions for [`WebContext`](super::WebContext).
 
 use crate::{Error, RequestAsyncResponder};
+use gtk::{gio, glib, prelude::*};
 use http::{header::CONTENT_TYPE, HeaderName, HeaderValue, Request, Response as HttpResponse};
 use std::{
   borrow::Cow,
@@ -13,9 +14,9 @@ use std::{
   path::{Path, PathBuf},
   rc::Rc,
 };
-use webkit6::{
-  gio, glib, gtk::prelude::*, prelude::*, soup, ApplicationInfo, NetworkSession, URIRequest,
-  URISchemeRequest, URISchemeResponse, WebContext, WebView,
+use webkit::{
+  prelude::*, soup, ApplicationInfo, NetworkSession, URIRequest, URISchemeRequest,
+  URISchemeResponse, WebContext, WebView,
 };
 
 #[derive(Debug)]

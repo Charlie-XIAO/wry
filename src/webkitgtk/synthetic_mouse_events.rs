@@ -1,6 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
-use webkit6::{gdk, gio, gtk, gtk::prelude::*, prelude::*, WebView};
+use gtk::{gdk, gio, prelude::*};
+use webkit::{prelude::*, WebView};
 
 pub fn setup(webview: &WebView) {
   let gesture = gtk::GestureClick::new();

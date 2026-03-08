@@ -3824,6 +3824,7 @@ dependencies = [
  "dpi 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "dunce",
  "getrandom 0.3.1",
+ "gtk4",
  "http",
  "http-range",
  "jni",
