@@ -26,7 +26,7 @@ struct App {
   #[cfg(target_os = "linux")]
   window: Option<gtk::Window>,
   webview: Option<WebView>,
-  proxy: EventLoopProxy<UserEvent>,
+  _proxy: EventLoopProxy<UserEvent>,
 }
 
 impl App {
@@ -34,7 +34,7 @@ impl App {
     Self {
       window: None,
       webview: None,
-      proxy,
+      _proxy: proxy,
     }
   }
 }
@@ -67,7 +67,7 @@ impl ApplicationHandler<UserEvent> for App {
 
     #[cfg(not(target_os = "linux"))]
     {
-      let attributes = Window::default_attributes().with_title("Simple");
+      let attributes = winit::window::Window::default_attributes().with_title("Simple");
       let window = _event_loop.create_window(attributes).unwrap();
       let webview = builder.build(&window).unwrap();
 
@@ -80,7 +80,7 @@ impl ApplicationHandler<UserEvent> for App {
       let window = gtk::Window::builder().title("Simple").build();
 
       {
-        let proxy = self.proxy.clone();
+        let proxy = self._proxy.clone();
         window.connect_close_request(move |_| {
           let _ = proxy.send_event(UserEvent::GtkClosed);
           glib::Propagation::Proceed
