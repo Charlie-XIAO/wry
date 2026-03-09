@@ -4,6 +4,8 @@
 
 #[cfg(target_os = "linux")]
 use gtk::{gdk, glib, prelude::*};
+#[cfg(not(target_os = "linux"))]
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::{
   application::ApplicationHandler,
   event::WindowEvent,
@@ -166,8 +168,10 @@ impl ApplicationHandler<UserEvent> for App {
 
               #[cfg(target_os = "macos")]
               {
-                use winit::platform::macos::WindowExtMacOS;
-                self.on_window_b = !self.on_window_b;
+                let ns_window = match new_parent.raw_window_handle() {
+                  RawWindowHandle::AppKit(raw) => raw.ns_view,
+                  _ => unreachable!("Not an AppKit window handle"),
+                };
                 self
                   .webview
                   .as_ref()
@@ -177,14 +181,19 @@ impl ApplicationHandler<UserEvent> for App {
               }
               #[cfg(target_os = "windows")]
               {
-                self.on_window_b = !self.on_window_b;
+                let hwnd = match new_parent.window_handle().unwrap().as_raw() {
+                  RawWindowHandle::Win32(raw) => raw.hwnd,
+                  _ => unreachable!("Not a Win32 window handle"),
+                };
                 self
                   .webview
                   .as_ref()
                   .unwrap()
-                  .reparent(new_parent.hwnd())
+                  .reparent(hwnd.get() as _)
                   .unwrap();
               }
+
+              self.on_window_b = !self.on_window_b;
             }
           }
         }
@@ -206,13 +215,13 @@ impl ApplicationHandler<UserEvent> for App {
         } else {
           self.window_b.as_ref().unwrap().clone()
         };
-        self.on_window_b = !self.on_window_b;
         self
           .webview
           .as_mut()
           .unwrap()
           .reparent(&new_parent)
           .unwrap();
+        self.on_window_b = !self.on_window_b;
       }
     }
   }
