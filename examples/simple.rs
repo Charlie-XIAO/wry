@@ -67,7 +67,9 @@ impl ApplicationHandler<UserEvent> for App {
 
     #[cfg(not(target_os = "linux"))]
     {
-      let attributes = winit::window::Window::default_attributes().with_title("Simple");
+      let attributes = winit::window::Window::default_attributes()
+        .with_title("Simple")
+        .with_inner_size(winit::dpi::LogicalSize::new(800., 600.));
       let window = _event_loop.create_window(attributes).unwrap();
       let webview = builder.build(&window).unwrap();
 
@@ -77,7 +79,11 @@ impl ApplicationHandler<UserEvent> for App {
 
     #[cfg(target_os = "linux")]
     {
-      let window = gtk::Window::builder().title("Simple").build();
+      let window = gtk::Window::builder()
+        .title("Simple")
+        .default_width(800)
+        .default_height(600)
+        .build();
 
       {
         let proxy = self._proxy.clone();

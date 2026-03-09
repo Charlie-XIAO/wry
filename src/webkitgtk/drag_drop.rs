@@ -119,7 +119,7 @@ pub(crate) fn connect_drag_event(webview: &WebView, handler: Box<dyn Fn(DragDrop
   {
     let controller = controller.clone();
     drop_target.connect_drag_enter(move |_, _, x, y| {
-      controller.store_position((x.round() as i32, y.round() as i32));
+      controller.store_position((x.round() as _, y.round() as _));
       gdk::DragAction::COPY
     });
   }
@@ -127,7 +127,7 @@ pub(crate) fn connect_drag_event(webview: &WebView, handler: Box<dyn Fn(DragDrop
   {
     let controller = controller.clone();
     drop_target.connect_drag_motion(move |_, _, x, y| {
-      let position = (x.round() as i32, y.round() as i32);
+      let position = (x.round() as _, y.round() as _);
       if controller.state() == DragControllerState::Entered {
         controller.call(DragDropEvent::Over { position });
       } else {
@@ -146,7 +146,7 @@ pub(crate) fn connect_drag_event(webview: &WebView, handler: Box<dyn Fn(DragDrop
           controller.leave();
           return controller.call(DragDropEvent::Drop {
             paths,
-            position: (x.round() as i32, y.round() as i32),
+            position: (x.round() as _, y.round() as _),
           });
         }
       }
