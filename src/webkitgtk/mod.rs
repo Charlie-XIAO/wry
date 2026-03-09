@@ -14,20 +14,19 @@ use std::{
   sync::{Arc, Mutex},
 };
 use webkit::{
-  prelude::*, soup, AutoplayPolicy, LoadEvent, NavigationPolicyDecision, NetworkProxyMode,
-  NetworkProxySettings, PolicyDecisionType, PrintOperation, URIRequest, UserContentInjectedFrames,
-  UserContentManager, UserScript, UserScriptInjectionTime, WebView, WebsiteDataTypes,
-  WebsitePolicies,
+  prelude::*, soup, AutoplayPolicy, LoadEvent, NavigationAction, NavigationPolicyDecision,
+  NetworkProxyMode, NetworkProxySettings, PolicyDecisionType, PrintOperation, URIRequest,
+  UserContentInjectedFrames, UserContentManager, UserScript, UserScriptInjectionTime, WebView,
+  WebsiteDataTypes, WebsitePolicies,
 };
 
+use web_context::WebContextExt;
 pub use web_context::WebContextImpl;
 
 use crate::{
   proxy::ProxyConfig, web_context::WebContext, Error, NewWindowFeatures, NewWindowOpener,
   NewWindowResponse, PageLoadEvent, Rect, Result, WebViewAttributes, RGBA,
 };
-
-use self::web_context::WebContextExt;
 
 const WEBVIEW_ID: &str = "webview_id";
 
@@ -46,7 +45,7 @@ pub(crate) struct InnerWebView {
 
 impl Drop for InnerWebView {
   fn drop(&mut self) {
-    unsafe { self.webview.destroy() }
+    self.remove_from_parent();
   }
 }
 
@@ -96,11 +95,9 @@ impl InnerWebView {
           format!("socks5://{}:{}", endpoint.host, endpoint.port)
         }
       };
-      if let Some(website_data_manager) = web_context.context().website_data_manager() {
-        let mut settings = NetworkProxySettings::new(Some(proxy_uri.as_str()), &[]);
-        website_data_manager
-          .set_network_proxy_settings(NetworkProxyMode::Custom, Some(&mut settings));
-      }
+      let network_session = web_context.network_session();
+      let settings = NetworkProxySettings::new(Some(proxy_uri.as_str()), &[]);
+      network_session.set_proxy_settings(NetworkProxyMode::Custom, Some(&settings));
     }
 
     // Extension loading
@@ -109,6 +106,8 @@ impl InnerWebView {
     }
 
     let webview = Self::create_webview(web_context, &attributes, &pl_attrs);
+
+    // TODO(Charlie-XIAO): Should we set v/h expand/align here?
 
     // Transparent
     if attributes.transparent {
@@ -136,7 +135,7 @@ impl InnerWebView {
 
     web_context.register_automation(webview.clone());
 
-    let is_in_fixed_parent = Self::add_to_container(&webview, container, &attributes);
+    let is_in_fixed_parent = Self::add_to_container(&webview, container, attributes.bounds)?;
 
     #[cfg(any(debug_assertions, feature = "devtools"))]
     let is_inspector_open = Self::attach_inspector_handlers(&webview);
@@ -170,9 +169,8 @@ impl InnerWebView {
       if let LoadEvent::Committed = event {
         let mut pending_scripts_ = pending_scripts.lock().unwrap();
         if let Some(pending_scripts) = pending_scripts_.take() {
-          let cancellable: Option<&gio::Cancellable> = None;
           for script in pending_scripts {
-            webview.run_javascript(&script, cancellable, |_| ());
+            webview.evaluate_javascript(&script, None, None, gio::Cancellable::NONE, |_| ());
           }
         }
       }
@@ -190,9 +188,7 @@ impl InnerWebView {
       w.webview.load_html(&html, None);
     }
 
-    if attributes.visible {
-      w.webview.show_all();
-    }
+    w.webview.set_visible(attributes.visible);
 
     if attributes.focused {
       w.webview.grab_focus();
@@ -233,11 +229,6 @@ impl InnerWebView {
       input_context.set_enable_preedit(false);
     }
 
-    // use system scrollbars
-    if let Some(context) = webview.context() {
-      context.set_use_system_appearance_for_scrollbars(false);
-    }
-
     if let Some(settings) = WebViewExt::settings(webview) {
       // Enable webgl, webaudio, canvas features as default.
       settings.set_enable_webgl(true);
@@ -273,7 +264,9 @@ impl InnerWebView {
     attributes: &mut WebViewAttributes,
   ) {
     // window.close()
-    webview.connect_close(move |webview| unsafe { webview.destroy() });
+    webview.connect_close(move |webview| {
+      webview.try_close();
+    });
 
     // Synthetic mouse events
     synthetic_mouse_events::setup(webview);
@@ -302,9 +295,8 @@ impl InnerWebView {
     // window creation handler
     if let Some(new_window_req_handler) = attributes.new_window_req_handler.take() {
       let related_webviews = Rc::new(Mutex::new(HashMap::new()));
-      webview.connect_create(move |webview, action| {
-        let url = action
-          .request()
+      web_view_connect_create(webview, move |webview, action| {
+        let url = navigation_action_get_request(action)
           .and_then(|request| request.uri())
           .map(|uri| uri.as_str().to_string())?;
         match new_window_req_handler(
@@ -319,29 +311,26 @@ impl InnerWebView {
         ) {
           NewWindowResponse::Allow => {
             let related_webviews = related_webviews.clone();
-            let toplevel = webview.toplevel().unwrap();
-            let window = toplevel.downcast::<gtk::ApplicationWindow>().unwrap();
+            let window = webview.root()?.downcast::<gtk::ApplicationWindow>().ok()?;
             let id = window.id();
-            let app = window.application().unwrap();
+            let app = window.application()?;
 
             let window = gtk::ApplicationWindow::builder()
               .application(&app)
               .title(&url)
               .build();
             let box_ = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            window.add(&box_);
+            window.set_child(Some(&box_));
 
             let related_webviews_ = related_webviews.clone();
             window.connect_destroy(move |_| {
               related_webviews_.lock().unwrap().remove(&id);
             });
 
-            window.show_all();
+            window.present();
             Self::new_gtk(
               &box_,
-              WebViewAttributes {
-                ..Default::default()
-              },
+              WebViewAttributes::default(),
               super::PlatformSpecificWebViewAttributes {
                 related_view: Some(webview.clone()),
                 ..Default::default()
@@ -370,7 +359,7 @@ impl InnerWebView {
 
         if let Some(policy) = policy_decision.dynamic_cast_ref::<NavigationPolicyDecision>() {
           if let Some(nav_action) = policy.navigation_action() {
-            if let Some(uri_req) = nav_action.request() {
+            if let Some(uri_req) = navigation_action_get_request(&nav_action) {
               if let Some(uri) = uri_req.uri() {
                 let allow = handler(uri.to_string());
                 if allow {
@@ -399,44 +388,50 @@ impl InnerWebView {
     }
   }
 
-  fn add_to_container<W>(webview: &WebView, container: &W, attributes: &WebViewAttributes) -> bool
+  fn add_to_container<W>(webview: &WebView, container: &W, bounds: Option<Rect>) -> Result<bool>
   where
     W: IsA<gtk::Widget>,
   {
     let mut is_in_fixed_parent = false;
 
-    let container_type = container.type_().name();
-    if container_type == "GtkBox" {
-      container
-        .dynamic_cast_ref::<gtk::Box>()
-        .unwrap()
-        .pack_start(webview, true, true, 0);
-    } else if container_type == "GtkFixed" {
+    if let Some(c) = container.dynamic_cast_ref::<gtk::Window>() {
+      c.set_child(Some(webview));
+    } else if let Some(c) = container.dynamic_cast_ref::<gtk::Box>() {
+      c.append(webview);
+    } else if let Some(c) = container.dynamic_cast_ref::<gtk::Fixed>() {
       let scale_factor = webview.scale_factor() as f64;
-      let (width, height) = attributes
-        .bounds
-        .map(|b| b.size.to_logical(scale_factor))
+      let (width, height) = bounds
+        .map(|b| b.size.to_logical::<i32>(scale_factor))
         .map(Into::into)
         .unwrap_or((1, 1));
-      let (x, y) = attributes
-        .bounds
-        .map(|b| b.position.to_logical(scale_factor))
+      let (x, y) = bounds
+        .map(|b| b.position.to_logical::<f64>(scale_factor))
         .map(Into::into)
         .unwrap_or((0., 0.));
 
       webview.set_size_request(width, height);
-
-      container
-        .dynamic_cast_ref::<gtk::Fixed>()
-        .unwrap()
-        .put(webview, x, y);
+      c.put(webview, x, y);
 
       is_in_fixed_parent = true;
     } else {
-      container.add(webview);
+      return Err(Error::UnsupportedParentWidget(
+        container.type_().name().to_string(),
+      ));
     }
 
-    is_in_fixed_parent
+    Ok(is_in_fixed_parent)
+  }
+
+  fn remove_from_parent(&self) {
+    if let Some(parent) = self.webview.parent() {
+      if let Some(p) = parent.dynamic_cast_ref::<gtk::Window>() {
+        p.set_child(gtk::Widget::NONE);
+      } else if let Some(p) = parent.dynamic_cast_ref::<gtk::Box>() {
+        p.remove(&self.webview);
+      } else if let Some(p) = parent.dynamic_cast_ref::<gtk::Fixed>() {
+        p.remove(&self.webview);
+      }
+    }
   }
 
   fn attach_ipc_handler(webview: WebView, attributes: &mut WebViewAttributes) {
@@ -451,20 +446,18 @@ impl InnerWebView {
       #[cfg(feature = "tracing")]
       let _span = tracing::info_span!(parent: None, "wry::ipc::handle").entered();
 
-      if let Some(js) = msg.js_value() {
-        if let Some(ipc_handler) = &ipc_handler {
-          ipc_handler(
-            Request::builder()
-              .uri(webview.uri().unwrap().to_string())
-              .body(js.to_string())
-              .unwrap(),
-          );
-        }
+      if let Some(ipc_handler) = &ipc_handler {
+        ipc_handler(
+          Request::builder()
+            .uri(webview.uri().unwrap().to_string())
+            .body(msg.to_string())
+            .unwrap(),
+        );
       }
     });
 
     // Register the handler we just connected
-    manager.register_script_message_handler("ipc");
+    manager.register_script_message_handler("ipc", None);
   }
 
   #[cfg(any(debug_assertions, feature = "devtools"))]
@@ -506,25 +499,25 @@ impl InnerWebView {
     if let Some(pending_scripts) = &mut *self.pending_scripts.lock().unwrap() {
       pending_scripts.push(js.into());
     } else {
-      let cancellable: Option<&gio::Cancellable> = None;
-
       #[cfg(feature = "tracing")]
       let span = SendEnteredSpan(tracing::debug_span!("wry::eval").entered());
 
-      self.webview.run_javascript(js, cancellable, |result| {
-        #[cfg(feature = "tracing")]
-        drop(span);
+      self
+        .webview
+        .evaluate_javascript(js, None, None, gio::Cancellable::NONE, |result| {
+          #[cfg(feature = "tracing")]
+          drop(span);
 
-        if let Some(callback) = callback {
-          let result = result
-            .map(|r| r.js_value().and_then(|js| js.to_json(0)))
-            .unwrap_or_default()
-            .unwrap_or_default()
-            .to_string();
+          if let Some(callback) = callback {
+            let result = result
+              .map(|r| r.to_json(0))
+              .unwrap_or_default()
+              .unwrap_or_default()
+              .to_string();
 
-          callback(result);
-        }
-      });
+            callback(result);
+          }
+        });
     }
 
     Ok(())
@@ -589,9 +582,9 @@ impl InnerWebView {
   }
 
   pub fn load_url_with_headers(&self, url: &str, headers: http::HeaderMap) -> Result<()> {
-    let req = URIRequest::builder().uri(url).build();
+    let req = URIRequest::new(url);
 
-    if let Some(ref mut req_headers) = req.http_headers() {
+    if let Some(req_headers) = req.http_headers() {
       for (header, value) in headers.iter() {
         req_headers.append(
           header.to_string().as_str(),
@@ -616,12 +609,12 @@ impl InnerWebView {
   }
 
   pub fn clear_all_browsing_data(&self) -> Result<()> {
-    if let Some(context) = self.webview.context() {
-      if let Some(data_manger) = context.website_data_manager() {
+    if let Some(network_session) = self.webview.network_session() {
+      if let Some(data_manger) = network_session.website_data_manager() {
         data_manger.clear(
           WebsiteDataTypes::ALL,
           glib::TimeSpan::from_seconds(0),
-          None::<&gio::Cancellable>,
+          gio::Cancellable::NONE,
           |_| {},
         );
       }
@@ -631,34 +624,31 @@ impl InnerWebView {
   }
 
   pub fn bounds(&self) -> Result<Rect> {
-    let mut bounds = Rect::default();
-
-    let (size, _) = self.webview.allocated_size();
-    bounds.size = LogicalSize::new(size.width(), size.height()).into();
-
-    Ok(bounds)
+    Ok(Rect {
+      size: LogicalSize::new(self.webview.width(), self.webview.height()).into(),
+      ..Default::default()
+    })
   }
 
   pub fn set_bounds(&self, bounds: Rect) -> Result<()> {
     let scale_factor = self.webview.scale_factor() as f64;
     let (width, height) = bounds.size.to_logical::<i32>(scale_factor).into();
-    let (x, y) = bounds.position.to_logical::<i32>(scale_factor).into();
+    let (x, y) = bounds.position.to_logical::<f64>(scale_factor).into();
 
     if self.is_in_fixed_parent {
-      self
-        .webview
-        .size_allocate(&gtk::Allocation::new(x, y, width, height), -1);
+      if let Some(parent) = self.webview.parent() {
+        if let Some(fixed) = parent.dynamic_cast_ref::<gtk::Fixed>() {
+          fixed.move_(&self.webview, x, y);
+        }
+      }
+      self.webview.set_size_request(width, height);
     }
 
     Ok(())
   }
 
   pub fn set_visible(&self, visible: bool) -> Result<()> {
-    if visible {
-      self.webview.show_all();
-    } else {
-      self.webview.hide();
-    }
+    self.webview.set_visible(visible);
     Ok(())
   }
 
@@ -668,8 +658,10 @@ impl InnerWebView {
   }
 
   pub fn focus_parent(&self) -> Result<()> {
-    if let Some(window) = self.webview.parent_window() {
-      window.focus(gdk::ffi::GDK_CURRENT_TIME.try_into().unwrap_or(0));
+    if let Some(root) = self.webview.root() {
+      if let Ok(window) = root.downcast::<gtk::Window>() {
+        window.grab_focus();
+      }
     }
 
     Ok(())
@@ -757,10 +749,10 @@ impl InnerWebView {
     let (tx, rx) = std::sync::mpsc::channel();
     if let Some(cookies_manager) = self
       .webview
-      .website_data_manager()
-      .and_then(|manager| manager.cookie_manager())
+      .network_session()
+      .and_then(|session| session.cookie_manager())
     {
-      cookies_manager.cookies(url, None::<&gio::Cancellable>, move |cookies| {
+      cookies_manager.cookies(url, gio::Cancellable::NONE, move |cookies| {
         let cookies = cookies.map(|cookies| {
           cookies
             .into_iter()
@@ -784,10 +776,10 @@ impl InnerWebView {
     let (tx, rx) = std::sync::mpsc::channel();
     if let Some(cookies_manager) = self
       .webview
-      .website_data_manager()
-      .and_then(|manager| manager.cookie_manager())
+      .network_session()
+      .and_then(|session| session.cookie_manager())
     {
-      cookies_manager.all_cookies(None::<&gio::Cancellable>, move |cookies| {
+      cookies_manager.all_cookies(gio::Cancellable::NONE, move |cookies| {
         let cookies = cookies.map(|cookies| {
           cookies
             .into_iter()
@@ -811,11 +803,11 @@ impl InnerWebView {
     let (tx, rx) = std::sync::mpsc::channel();
     if let Some(cookies_manager) = self
       .webview
-      .website_data_manager()
-      .and_then(|manager| manager.cookie_manager())
+      .network_session()
+      .and_then(|session| session.cookie_manager())
     {
       let mut soup_cookie = Self::cookie_into_soup_cookie(cookie);
-      cookies_manager.add_cookie(&mut soup_cookie, None::<&gio::Cancellable>, move |ret| {
+      cookies_manager.add_cookie(&mut soup_cookie, gio::Cancellable::NONE, move |ret| {
         let _ = tx.send(ret);
       });
     }
@@ -833,11 +825,11 @@ impl InnerWebView {
     let (tx, rx) = std::sync::mpsc::channel();
     if let Some(cookies_manager) = self
       .webview
-      .website_data_manager()
-      .and_then(|manager| manager.cookie_manager())
+      .network_session()
+      .and_then(|session| session.cookie_manager())
     {
       let mut soup_cookie = Self::cookie_into_soup_cookie(cookie);
-      cookies_manager.delete_cookie(&mut soup_cookie, None::<&gio::Cancellable>, move |ret| {
+      cookies_manager.delete_cookie(&mut soup_cookie, gio::Cancellable::NONE, move |ret| {
         let _ = tx.send(ret);
       });
     }
@@ -851,51 +843,79 @@ impl InnerWebView {
     }
   }
 
-  pub fn reparent<W>(&self, container: &W) -> Result<()>
+  pub fn reparent<W>(&mut self, container: &W) -> Result<()>
   where
     W: IsA<gtk::Widget>,
   {
-    if let Some(parent) = self
-      .webview
-      .parent()
-      .and_then(|p| p.dynamic_cast::<gtk::Widget>().ok())
-    {
-      parent.remove(&self.webview);
-
-      let container_type = container.type_().name();
-      if container_type == "GtkBox" {
-        container
-          .dynamic_cast_ref::<gtk::Box>()
-          .unwrap()
-          .pack_start(&self.webview, true, true, 0);
-      } else if container_type == "GtkFixed" {
-        container
-          .dynamic_cast_ref::<gtk::Fixed>()
-          .unwrap()
-          .put(&self.webview, 0., 0.);
-      } else {
-        container.add(&self.webview);
-      }
-    }
-
+    self.remove_from_parent();
+    self.is_in_fixed_parent = Self::add_to_container(&self.webview, container, None)?;
     Ok(())
   }
 }
 
 pub fn platform_webview_version() -> Result<String> {
-  let (major, minor, patch) = unsafe {
-    (
-      webkit::functions::major_version(),
-      webkit::functions::minor_version(),
-      webkit::functions::micro_version(),
-    )
-  };
+  let (major, minor, patch) = (
+    webkit::functions::major_version(),
+    webkit::functions::minor_version(),
+    webkit::functions::micro_version(),
+  );
   Ok(format!("{major}.{minor}.{patch}"))
+}
+
+// Workaround for https://gitlab.gnome.org/World/Rust/webkit6-rs/-/issues/12
+fn web_view_connect_create<F: Fn(&WebView, &NavigationAction) -> Option<gtk::Widget> + 'static>(
+  webview: &WebView,
+  f: F,
+) -> glib::SignalHandlerId {
+  use glib::translate::*;
+  use std::boxed::Box as Box_;
+  use webkit::ffi;
+
+  unsafe extern "C" fn create_trampoline<
+    P: IsA<WebView>,
+    F: Fn(&P, &NavigationAction) -> Option<gtk::Widget> + 'static,
+  >(
+    this: *mut ffi::WebKitWebView,
+    navigation_action: *mut ffi::WebKitNavigationAction,
+    f: glib::ffi::gpointer,
+  ) -> *mut gtk::ffi::GtkWidget {
+    unsafe {
+      let f: &F = &*(f as *const F);
+      f(
+        WebView::from_glib_borrow(this).unsafe_cast_ref(),
+        &from_glib_borrow(navigation_action),
+      )
+      .to_glib_full()
+    }
+  }
+  unsafe {
+    let f = Box_::new(f);
+    glib::signal::connect_raw(
+      webview.as_ptr() as *mut _,
+      c"create".as_ptr(),
+      Some(std::mem::transmute::<*const (), unsafe extern "C" fn()>(
+        create_trampoline::<WebView, F> as *const (),
+      )),
+      Box_::into_raw(f),
+    )
+  }
+}
+
+// Workaround for https://gitlab.gnome.org/World/Rust/webkit6-rs/-/issues/13
+fn navigation_action_get_request(action: &NavigationAction) -> Option<URIRequest> {
+  use glib::translate::*;
+  use webkit::ffi;
+
+  unsafe {
+    from_glib_none(ffi::webkit_navigation_action_get_request(mut_override(
+      action.to_glib_none().0,
+    )))
+  }
 }
 
 // SAFETY: only use this when you are sure the span will be dropped on the same thread it was entered
 #[cfg(feature = "tracing")]
-struct SendEnteredSpan(tracing::span::EnteredSpan);
+struct SendEnteredSpan(#[allow(dead_code)] tracing::span::EnteredSpan);
 
 #[cfg(feature = "tracing")]
 unsafe impl Send for SendEnteredSpan {}

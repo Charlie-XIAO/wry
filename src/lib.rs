@@ -2363,7 +2363,7 @@ pub trait WebViewExtUnix: Sized {
   fn webview(&self) -> webkit::WebView;
 
   /// Attaches this webview to the given Widget and removes it from the current one.
-  fn reparent<W>(&self, widget: &W) -> Result<()>
+  fn reparent<W>(&mut self, widget: &W) -> Result<()>
   where
     W: gtk::prelude::IsA<gtk::Widget>;
 }
@@ -2381,7 +2381,7 @@ impl WebViewExtUnix for WebView {
     self.webview.webview.clone()
   }
 
-  fn reparent<W>(&self, widget: &W) -> Result<()>
+  fn reparent<W>(&mut self, widget: &W) -> Result<()>
   where
     W: gtk::prelude::IsA<gtk::Widget>,
   {

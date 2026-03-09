@@ -171,14 +171,13 @@ impl WebContextExt for super::WebContext {
         #[cfg(feature = "linux-body")]
         {
           // Set request http body
-          let cancellable: Option<&gio::Cancellable> = None;
           body = request
             .http_body()
             .map(|s| {
               const BUFFER_LEN: usize = 1024;
               let mut result = Vec::new();
               let mut buffer = vec![0; BUFFER_LEN];
-              while let Ok(count) = s.read(&mut buffer[..], cancellable) {
+              while let Ok(count) = s.read(&mut buffer[..], gio::Cancellable::NONE) {
                 if count == BUFFER_LEN {
                   result.append(&mut buffer);
                   buffer.resize(BUFFER_LEN, 0);
