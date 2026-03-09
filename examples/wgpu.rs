@@ -238,9 +238,10 @@ impl ApplicationHandler for State {
       target_os = "openbsd",
     ))]
     {
-      while gtk::events_pending() {
-        gtk::main_iteration_do(false);
-      }
+      use gtk::glib;
+
+      let context = glib::MainContext::default();
+      while context.iteration(false) {}
     }
   }
 }
@@ -253,19 +254,7 @@ fn main() {
     target_os = "netbsd",
     target_os = "openbsd",
   ))]
-  {
-    use gtk::prelude::DisplayExtManual;
-
-    gtk::init().unwrap();
-    if gtk::gdk::Display::default().unwrap().backend().is_wayland() {
-      panic!("This example doesn't support wayland!");
-    }
-
-    winit::platform::x11::register_xlib_error_hook(Box::new(|_display, error| {
-      let error = error as *mut x11_dl::xlib::XErrorEvent;
-      (unsafe { (*error).error_code }) == 170
-    }));
-  }
+  gtk::init().unwrap();
 
   let event_loop = EventLoop::new().unwrap();
   let mut state = State::default();
