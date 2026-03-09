@@ -45,7 +45,7 @@ pub(crate) struct InnerWebView {
 
 impl Drop for InnerWebView {
   fn drop(&mut self) {
-    self.remove_from_parent();
+    Self::remove_from_parent(&self.webview);
   }
 }
 
@@ -204,7 +204,8 @@ impl InnerWebView {
   ) -> WebView {
     let mut builder = WebView::builder()
       .user_content_manager(&UserContentManager::new())
-      .is_controlled_by_automation(web_context.allows_automation());
+      .is_controlled_by_automation(web_context.allows_automation())
+      .network_session(web_context.network_session());
 
     if attributes.autoplay {
       builder = builder.website_policies(
@@ -265,7 +266,7 @@ impl InnerWebView {
   ) {
     // window.close()
     webview.connect_close(move |webview| {
-      webview.try_close();
+      Self::remove_from_parent(webview);
     });
 
     // Synthetic mouse events
@@ -422,14 +423,14 @@ impl InnerWebView {
     Ok(is_in_fixed_parent)
   }
 
-  fn remove_from_parent(&self) {
-    if let Some(parent) = self.webview.parent() {
+  fn remove_from_parent(webview: &WebView) {
+    if let Some(parent) = webview.parent() {
       if let Some(p) = parent.dynamic_cast_ref::<gtk::Window>() {
         p.set_child(gtk::Widget::NONE);
       } else if let Some(p) = parent.dynamic_cast_ref::<gtk::Box>() {
-        p.remove(&self.webview);
+        p.remove(webview);
       } else if let Some(p) = parent.dynamic_cast_ref::<gtk::Fixed>() {
-        p.remove(&self.webview);
+        p.remove(webview);
       }
     }
   }
@@ -847,7 +848,7 @@ impl InnerWebView {
   where
     W: IsA<gtk::Widget>,
   {
-    self.remove_from_parent();
+    Self::remove_from_parent(&self.webview);
     self.is_in_fixed_parent = Self::add_to_container(&self.webview, container, None)?;
     Ok(())
   }
