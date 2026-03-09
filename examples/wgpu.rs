@@ -228,22 +228,6 @@ impl ApplicationHandler for State {
       _ => {}
     }
   }
-
-  fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-    #[cfg(any(
-      target_os = "linux",
-      target_os = "dragonfly",
-      target_os = "freebsd",
-      target_os = "netbsd",
-      target_os = "openbsd",
-    ))]
-    {
-      use gtk::glib;
-
-      let context = glib::MainContext::default();
-      while context.iteration(false) {}
-    }
-  }
 }
 
 fn main() {
@@ -254,7 +238,7 @@ fn main() {
     target_os = "netbsd",
     target_os = "openbsd",
   ))]
-  gtk::init().unwrap();
+  panic!("This example doesn't support Linux!");
 
   let event_loop = EventLoop::new().unwrap();
   let mut state = State::default();
