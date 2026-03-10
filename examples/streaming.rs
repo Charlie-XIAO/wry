@@ -56,7 +56,7 @@ fn main() {
       let builder = WebViewBuilder::new()
         .with_custom_protocol(
           "wry".into(),
-          move |_webview_id, request| match wry_protocol(request) {
+          move |_, request| match wry_protocol(request) {
             Ok(r) => r.map(Into::into),
             Err(e) => http::Response::builder()
               .header(CONTENT_TYPE, "text/plain")
@@ -78,7 +78,6 @@ fn main() {
               .map(Into::into),
           },
         )
-        // tell the webview to load the custom protocol
         .with_url("wry://localhost");
 
       #[cfg(not(target_os = "linux"))]
@@ -88,6 +87,7 @@ fn main() {
           .with_inner_size(winit::dpi::LogicalSize::new(800., 600.));
         let window = _event_loop.create_window(attributes).unwrap();
         let webview = builder.build(&window).unwrap();
+
         self.window = Some(window);
         self.webview = Some(webview);
       }
@@ -110,6 +110,7 @@ fn main() {
 
         let webview = builder.build_gtk(&window).unwrap();
         window.present();
+
         self.window = Some(window);
         self.webview = Some(webview);
       }
@@ -314,7 +315,12 @@ fn main() {
   }
 
   #[cfg(target_os = "linux")]
-  gtk::init().unwrap();
+  {
+    gtk::init().unwrap();
+    println!("This example might not work properly on Linux. See also:");
+    println!("- WebKit bug: https://bugs.webkit.org/show_bug.cgi?id=146351");
+    println!("- Tauri issue: https://github.com/tauri-apps/tauri/issues/3725");
+  }
 
   let event_loop = EventLoop::<UserEvent>::with_user_event().build().unwrap();
   let proxy = event_loop.create_proxy();

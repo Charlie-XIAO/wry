@@ -146,7 +146,6 @@ impl WebContextExt for super::WebContext {
         #[cfg(feature = "tracing")]
         span.record("uri", uri);
 
-        #[allow(unused_mut)]
         let mut http_request = Request::builder().uri(uri).method("GET");
 
         // Set request http headers
