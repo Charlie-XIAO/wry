@@ -54,9 +54,8 @@ fn main() {
   impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
       let builder = WebViewBuilder::new()
-        .with_custom_protocol(
-          "wry".into(),
-          move |_, request| match wry_protocol(request) {
+        .with_custom_protocol("wry".into(), move |_, request| {
+          match wry_protocol(request) {
             Ok(r) => r.map(Into::into),
             Err(e) => http::Response::builder()
               .header(CONTENT_TYPE, "text/plain")
@@ -64,8 +63,8 @@ fn main() {
               .body(e.to_string().as_bytes().to_vec())
               .unwrap()
               .map(Into::into),
-          },
-        )
+          }
+        })
         .with_custom_protocol(
           "stream".into(),
           move |_webview_id, request| match stream_protocol(request) {
@@ -84,7 +83,7 @@ fn main() {
       {
         let attributes = winit::window::Window::default_attributes()
           .with_title("Streaming")
-          .with_inner_size(winit::dpi::LogicalSize::new(800., 600.));
+          .with_inner_size(winit::dpi::LogicalSize::new(480., 360.));
         let window = _event_loop.create_window(attributes).unwrap();
         let webview = builder.build(&window).unwrap();
 
@@ -96,8 +95,8 @@ fn main() {
       {
         let window = gtk::Window::builder()
           .title("Streaming")
-          .default_width(800)
-          .default_height(600)
+          .default_width(480)
+          .default_height(360)
           .build();
 
         {
