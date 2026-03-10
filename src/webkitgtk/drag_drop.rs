@@ -8,8 +8,8 @@ use std::{
   rc::Rc,
 };
 
-use gtk::{glib::GString, prelude::*};
-use webkit2gtk::WebView;
+use gtk::{gdk, gio, glib, prelude::*};
+use webkit::WebView;
 
 use crate::DragDropEvent;
 
@@ -72,58 +72,93 @@ impl DragDropController {
 
 pub(crate) fn connect_drag_event(webview: &WebView, handler: Box<dyn Fn(DragDropEvent) -> bool>) {
   let controller = Rc::new(DragDropController::new(handler));
+  let drop_target = gtk::DropTargetAsync::new(
+    Some(gdk::ContentFormats::for_type(gdk::FileList::static_type())),
+    gdk::DragAction::COPY,
+  );
 
   {
     let controller = controller.clone();
-    webview.connect_drag_data_received(move |_, _, _, _, data, info, _| {
-      if info == 2 {
-        let uris = data.uris();
-        let paths = uris.iter().map(path_buf_from_uri).collect::<Vec<_>>();
-        controller.enter();
-        controller.call(DragDropEvent::Enter {
-          paths: paths.clone(),
-          position: controller.position.get(),
-        });
-        controller.store_paths(paths);
-      }
+    drop_target.connect_accept(move |target, drop| {
+      let target = target.clone();
+      let controller = controller.clone();
+      let drop2 = drop.clone();
+
+      drop.read_value_async(
+        gdk::FileList::static_type(),
+        glib::Priority::DEFAULT,
+        gio::Cancellable::NONE,
+        move |result| {
+          let Ok(value) = result else {
+            target.reject_drop(&drop2);
+            return;
+          };
+          let Ok(files) = value.get::<gdk::FileList>() else {
+            target.reject_drop(&drop2);
+            return;
+          };
+
+          let paths: Vec<_> = files.files().iter().map(path_buf_from_file).collect();
+          if paths.is_empty() {
+            target.reject_drop(&drop2);
+            return;
+          }
+
+          controller.enter();
+          controller.call(DragDropEvent::Enter {
+            paths: paths.clone(),
+            position: controller.position.get(),
+          });
+          controller.store_paths(paths);
+        },
+      );
+      true
     });
   }
 
   {
     let controller = controller.clone();
-    webview.connect_drag_motion(move |_, _, x, y, _| {
+    drop_target.connect_drag_enter(move |_, _, x, y| {
+      controller.store_position((x.round() as _, y.round() as _));
+      gdk::DragAction::COPY
+    });
+  }
+
+  {
+    let controller = controller.clone();
+    drop_target.connect_drag_motion(move |_, _, x, y| {
+      let position = (x.round() as _, y.round() as _);
       if controller.state() == DragControllerState::Entered {
-        controller.call(DragDropEvent::Over { position: (x, y) });
+        controller.call(DragDropEvent::Over { position });
       } else {
-        controller.store_position((x, y));
+        controller.store_position(position);
       }
-      false
+      gdk::DragAction::COPY
     });
   }
 
   {
     let controller = controller.clone();
-    webview.connect_drag_drop(move |_, ctx, x, y, time| {
-      if controller.state() == DragControllerState::Leaving {
+    drop_target.connect_drop(move |_, drop, x, y| {
+      if controller.state() == DragControllerState::Entered {
         if let Some(paths) = controller.take_paths() {
-          ctx.drop_finish(true, time);
+          drop.finish(gdk::DragAction::COPY);
           controller.leave();
           return controller.call(DragDropEvent::Drop {
             paths,
-            position: (x, y),
+            position: (x.round() as _, y.round() as _),
           });
         }
       }
-
       false
     });
   }
 
-  webview.connect_drag_leave(move |_w, _, _| {
+  drop_target.connect_drag_leave(move |_, _| {
     if controller.state() != DragControllerState::Left {
       controller.leaving();
       let controller = controller.clone();
-      gtk::glib::idle_add_local_once(move || {
+      glib::idle_add_local_once(move || {
         if controller.state() == DragControllerState::Leaving {
           controller.leave();
           controller.call(DragDropEvent::Leave);
@@ -131,11 +166,16 @@ pub(crate) fn connect_drag_event(webview: &WebView, handler: Box<dyn Fn(DragDrop
       });
     }
   });
+
+  webview.add_controller(drop_target);
 }
 
-fn path_buf_from_uri(gstr: &GString) -> PathBuf {
-  let path = gstr.as_str();
-  let path = path.strip_prefix("file://").unwrap_or(path);
+fn path_buf_from_file(file: &gio::File) -> PathBuf {
+  if let Some(path) = file.path() {
+    return path;
+  }
+  let uri = file.uri();
+  let path = uri.strip_prefix("file://").unwrap_or(uri.as_str());
   let path = percent_encoding::percent_decode(path.as_bytes())
     .decode_utf8_lossy()
     .to_string();

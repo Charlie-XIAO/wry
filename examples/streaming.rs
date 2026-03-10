@@ -2,100 +2,142 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-fn main() -> wry::Result<()> {
-  imp::main()
-}
-
-#[cfg(not(feature = "protocol"))]
-mod imp {
-  pub fn main() -> wry::Result<()> {
-    unimplemented!()
-  }
-}
-
 #[cfg(feature = "protocol")]
-mod imp {
-
+fn main() {
   use std::{
     io::{Read, Seek, SeekFrom, Write},
     path::PathBuf,
   };
 
+  #[cfg(target_os = "linux")]
+  use gtk::{glib, prelude::*};
   use http::{header, StatusCode};
   use http_range::HttpRange;
-  use tao::{
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
+  use winit::{
+    application::ApplicationHandler,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
+    window::WindowId,
   };
+  #[cfg(target_os = "linux")]
+  use wry::WebViewBuilderExtUnix;
   use wry::{
     http::{header::*, Request, Response},
-    WebViewBuilder,
+    WebView, WebViewBuilder,
   };
 
-  pub fn main() -> wry::Result<()> {
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+  #[derive(Debug)]
+  enum UserEvent {
+    #[cfg(target_os = "linux")]
+    GtkClosed,
+  }
 
-    let builder = WebViewBuilder::new()
-      .with_custom_protocol(
-        "wry".into(),
-        move |_webview_id, request| match wry_protocol(request) {
-          Ok(r) => r.map(Into::into),
-          Err(e) => http::Response::builder()
-            .header(CONTENT_TYPE, "text/plain")
-            .status(500)
-            .body(e.to_string().as_bytes().to_vec())
-            .unwrap()
-            .map(Into::into),
-        },
-      )
-      .with_custom_protocol(
-        "stream".into(),
-        move |_webview_id, request| match stream_protocol(request) {
-          Ok(r) => r.map(Into::into),
-          Err(e) => http::Response::builder()
-            .header(CONTENT_TYPE, "text/plain")
-            .status(500)
-            .body(e.to_string().as_bytes().to_vec())
-            .unwrap()
-            .map(Into::into),
-        },
-      )
-      // tell the webview to load the custom protocol
-      .with_url("wry://localhost");
+  struct App {
+    #[cfg(not(target_os = "linux"))]
+    window: Option<winit::window::Window>,
+    #[cfg(target_os = "linux")]
+    window: Option<gtk::Window>,
+    webview: Option<WebView>,
+    _proxy: EventLoopProxy<UserEvent>,
+  }
 
-    #[cfg(any(
-      target_os = "windows",
-      target_os = "macos",
-      target_os = "ios",
-      target_os = "android"
-    ))]
-    let _webview = builder.build(&window)?;
-    #[cfg(not(any(
-      target_os = "windows",
-      target_os = "macos",
-      target_os = "ios",
-      target_os = "android"
-    )))]
-    let _webview = {
-      use tao::platform::unix::WindowExtUnix;
-      use wry::WebViewBuilderExtUnix;
-      let vbox = window.default_vbox().unwrap();
-      builder.build_gtk(vbox)?
-    };
-
-    event_loop.run(move |event, _, control_flow| {
-      *control_flow = ControlFlow::Wait;
-
-      if let Event::WindowEvent {
-        event: WindowEvent::CloseRequested,
-        ..
-      } = event
-      {
-        *control_flow = ControlFlow::Exit
+  impl App {
+    fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
+      Self {
+        window: None,
+        webview: None,
+        _proxy: proxy,
       }
-    });
+    }
+  }
+
+  impl ApplicationHandler<UserEvent> for App {
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
+      let builder = WebViewBuilder::new()
+        .with_custom_protocol("wry".into(), move |_, request| {
+          match wry_protocol(request) {
+            Ok(r) => r.map(Into::into),
+            Err(e) => http::Response::builder()
+              .header(CONTENT_TYPE, "text/plain")
+              .status(500)
+              .body(e.to_string().as_bytes().to_vec())
+              .unwrap()
+              .map(Into::into),
+          }
+        })
+        .with_custom_protocol(
+          "stream".into(),
+          move |_webview_id, request| match stream_protocol(request) {
+            Ok(r) => r.map(Into::into),
+            Err(e) => http::Response::builder()
+              .header(CONTENT_TYPE, "text/plain")
+              .status(500)
+              .body(e.to_string().as_bytes().to_vec())
+              .unwrap()
+              .map(Into::into),
+          },
+        )
+        .with_url("wry://localhost");
+
+      #[cfg(not(target_os = "linux"))]
+      {
+        let attributes = winit::window::Window::default_attributes()
+          .with_title("Streaming")
+          .with_inner_size(winit::dpi::LogicalSize::new(800., 600.));
+        let window = _event_loop.create_window(attributes).unwrap();
+        let webview = builder.build(&window).unwrap();
+
+        self.window = Some(window);
+        self.webview = Some(webview);
+      }
+
+      #[cfg(target_os = "linux")]
+      {
+        let window = gtk::Window::builder()
+          .title("Streaming")
+          .default_width(800)
+          .default_height(600)
+          .build();
+
+        {
+          let proxy = self._proxy.clone();
+          window.connect_close_request(move |_| {
+            let _ = proxy.send_event(UserEvent::GtkClosed);
+            glib::Propagation::Proceed
+          });
+        }
+
+        let webview = builder.build_gtk(&window).unwrap();
+        window.present();
+
+        self.window = Some(window);
+        self.webview = Some(webview);
+      }
+    }
+
+    fn window_event(
+      &mut self,
+      _event_loop: &ActiveEventLoop,
+      _window_id: WindowId,
+      event: WindowEvent,
+    ) {
+      match event {
+        #[cfg(not(target_os = "linux"))]
+        WindowEvent::CloseRequested => {
+          _event_loop.exit();
+        }
+        _ => {}
+      }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+      match event {
+        #[cfg(target_os = "linux")]
+        UserEvent::GtkClosed => {
+          _event_loop.exit();
+        }
+      }
+    }
   }
 
   fn wry_protocol(
@@ -107,14 +149,10 @@ mod imp {
     let path = if path == "/" {
       "index.html"
     } else {
-      //  removing leading slash
-      &path[1..]
+      &path[1..] // removing leading slash
     };
     let content = std::fs::read(std::fs::canonicalize(root.join(path))?)?;
 
-    // Return asset contents and mime types based on file extentions
-    // If you don't want to do this manually, there are some crates for you.
-    // Such as `infer` and `mime_guess`.
     let mimetype = if path.ends_with(".html") || path == "/" {
       "text/html"
     } else if path.ends_with(".js") {
@@ -170,7 +208,7 @@ mod imp {
         return Ok(not_satisfiable()?);
       };
 
-      /// The Maximum bytes we send in one range
+      // The maximum bytes we send in one range
       const MAX_LEN: u64 = 1000 * 1024;
 
       if ranges.len() == 1 {
@@ -274,4 +312,22 @@ mod imp {
         a
       })
   }
+
+  #[cfg(target_os = "linux")]
+  {
+    gtk::init().unwrap();
+    println!("This example might not work properly on Linux. See also:");
+    println!("- WebKit bug: https://bugs.webkit.org/show_bug.cgi?id=146351");
+    println!("- Tauri issue: https://github.com/tauri-apps/tauri/issues/3725");
+  }
+
+  let event_loop = EventLoop::<UserEvent>::with_user_event().build().unwrap();
+  let proxy = event_loop.create_proxy();
+  let mut app = App::new(proxy);
+  event_loop.run_app(&mut app).unwrap();
+}
+
+#[cfg(not(feature = "protocol"))]
+fn main() {
+  println!("The protocol feature is required to run this example");
 }

@@ -1,3 +1,6 @@
+> [!NOTE]
+> This is a fork of [wry](https://github.com/tauri-apps/wry) that uses [GTK4](https://crates.io/crates/gtk4) and [WebKitGTK6](https://crates.io/crates/webkit6).
+
 <p align="center"><img height="100" src="https://raw.githubusercontent.com/tauri-apps/wry/refs/heads/dev/.github/splash.png" alt="WRY Webview Rendering library" /></p>
 
 [![](https://img.shields.io/crates/v/wry?style=flat-square)](https://crates.io/crates/wry) [![](https://img.shields.io/docsrs/wry?style=flat-square)](https://docs.rs/wry/)
@@ -15,7 +18,7 @@ You can use a windowing library like [`tao`] or [`winit`].
 
 ### Examples
 
-This example leverages the [`HasWindowHandle`] and supports Windows, macOS, iOS, Android and Linux (X11 Only).
+This example leverages the [`HasWindowHandle`] and supports Windows, macOS, iOS, and Android.
 See the following example using [`winit`]:
 
 ```rust
@@ -45,7 +48,7 @@ let mut app = App::default();
 event_loop.run_app(&mut app).unwrap();
 ```
 
-If you also want to support Wayland too, then we recommend you use [`WebViewBuilderExtUnix::new_gtk`] on Linux.
+If you also want to support Linux too, then we recommend you use [`WebViewBuilderExtUnix::new_gtk`] on Linux.
 See the following example using [`tao`]:
 
 ```rust
@@ -62,8 +65,7 @@ let webview = builder.build_gtk(window.gtk_window()).unwrap();
 
 ### Child webviews
 
-You can use [`WebView::new_as_child`] or [`WebViewBuilder::new_as_child`] to create the webview as a child inside another window. This is supported on
-macOS, Windows and Linux (X11 Only).
+You can use [`WebView::new_as_child`] or [`WebViewBuilder::new_as_child`] to create the webview as a child inside another window. This is supported on macOS and Windows.
 
 ```rust
 #[derive(Default)]
@@ -96,7 +98,7 @@ let mut app = App::default();
 event_loop.run_app(&mut app).unwrap();
 ```
 
-If you want to support X11 and Wayland at the same time, we recommend using
+If you want to support Linux as well, we recommend using
 [`WebViewExtUnix::new_gtk`] or [`WebViewBuilderExtUnix::new_gtk`] with [`gtk::Fixed`].
 
 ```rust
@@ -114,11 +116,12 @@ let builder = WebViewBuilder::new()
 let webview = builder.build_as_child(&window).unwrap();
 #[cfg(target_os = "linux")]
 let webview = {
-  # use gtk::prelude::*;
+  use gtk::prelude::*;
   let vbox = window.default_vbox().unwrap(); // tao adds a gtk::Box by default
   let fixed = gtk::Fixed::new();
-  fixed.show_all();
-  vbox.pack_start(&fixed, true, true, 0);
+  fixed.set_hexpand(true);
+  fixed.set_vexpand(true);
+  vbox.append(&fixed);
   builder.build_gtk(&fixed).unwrap()
 };
 ```
@@ -130,61 +133,36 @@ Here is the underlying web engine each platform uses, and some dependencies you 
 #### Linux
 
 [WebKitGTK](https://webkitgtk.org/) is used to provide webviews on Linux which requires GTK,
-so if the windowing library doesn't support GTK (as in [`winit`])
-you'll need to call [`gtk::init`] before creating the webview and then call [`gtk::main_iteration_do`] alongside
-your windowing library event loop.
+so if the windowing library doesn't support GTK (as in [`winit`]), you'll need to manually
+create GTK windows and advance the GTK event loop rather than relying on the winit windows.
 
-```rust
-#[derive(Default)]
-struct App {
-  webview_window: Option<(Window, WebView)>,
-}
+Note that if you need to make GTK and non-GTK windows stay in the same winit event loop, you can try to use one of the branches in https://github.com/Charlie-XIAO/winit/branches named `patches/v.../glib`, e.g.,
 
-impl ApplicationHandler for App {
-  fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-    let window = event_loop.create_window(Window::default_attributes()).unwrap();
-    let webview = WebViewBuilder::new()
-      .with_url("https://tauri.app")
-      .build(&window)
-      .unwrap();
-
-    self.webview_window = Some((window, webview));
-  }
-
-  fn window_event(&mut self, _event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {}
-
-  // Advance GTK event loop <!----- IMPORTANT
-  fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-    #[cfg(target_os = "linux")]
-    while gtk::events_pending() {
-      gtk::main_iteration_do(false);
-    }
-  }
-}
-
-let event_loop = EventLoop::new().unwrap();
-let mut app = App::default();
-event_loop.run_app(&mut app).unwrap();
+```toml
+# Cargo.toml
+winit = { git = "https://github.com/Charlie-XIAO/winit.git", branch = "patches/v0.31.x/glib" }
 ```
+
+It threads a GLib main context in the winit event loop, so you don't need to manually advance the GTK event loop in an unreliable way.
 
 ##### Linux Dependencies
 
 ###### Arch Linux / Manjaro:
 
 ```bash
-sudo pacman -S webkit2gtk-4.1
+sudo pacman -S webkitgtk-6.0
 ```
 
 ###### Debian / Ubuntu:
 
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev
+sudo apt install libwebkitgtk-6.0-dev
 ```
 
 ###### Fedora
 
 ```bash
-sudo dnf install gtk3-devel webkit2gtk4.1-devel
+sudo dnf install gtk4-devel webkitgtk6.0-devel
 ```
 
 ###### Nix & NixOS
@@ -197,7 +175,7 @@ let
    pkgs = import (fetchTarball("channel:nixpkgs-unstable")) { };
    packages = with pkgs; [
      pkg-config
-     webkitgtk_4_1
+     webkitgtk_6_0
    ];
  in
  pkgs.mkShell {
@@ -216,7 +194,7 @@ nix-shell shell.nix
 
 (specifications->manifest
   '("pkg-config"                ; Helper tool used when compiling
-    "webkitgtk"                 ; Web content engine fot GTK+
+    "webkitgtk-6.0"             ; Web content engine fot GTK+
  ))
 ```
 
@@ -288,8 +266,7 @@ Wry uses a set of feature flags to toggle several advanced features.
   Avoid this in release build if your app needs to publish to App Store.
 - `fullscreen`: Fullscreen video and other media on **macOS** requires calling private functions.
   Avoid this in release build if your app needs to publish to App Store.
-- `linux-body`: Enables body support of custom protocol request on Linux. Requires
-  WebKit2GTK v2.40 or above.
+- `linux-body`: Enables body support of custom protocol request on Linux.
 - `tracing`: enables [`tracing`] for `evaluate_script`, `ipc_handler`, and `custom_protocols`.
 
 ### Partners

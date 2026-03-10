@@ -2,79 +2,165 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-use tao::{
-  event::{Event, WindowEvent},
-  event_loop::{ControlFlow, EventLoop},
-  window::WindowBuilder,
+#[cfg(target_os = "linux")]
+use gtk::{gdk, glib, prelude::*};
+use winit::{
+  application::ApplicationHandler,
+  event::WindowEvent,
+  event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
+  window::WindowId,
 };
-use wry::WebViewBuilder;
+#[cfg(target_os = "linux")]
+use wry::WebViewBuilderExtUnix;
+use wry::{WebView, WebViewBuilder};
 
-fn main() -> wry::Result<()> {
-  let event_loop = EventLoop::new();
-  #[allow(unused_mut)]
-  let mut builder = WindowBuilder::new()
-    .with_decorations(false)
-    // There are actually three layer of background color when creating webview window.
-    // The first is window background...
-    .with_transparent(true);
-  #[cfg(target_os = "windows")]
-  {
-    use tao::platform::windows::WindowBuilderExtWindows;
-    builder = builder.with_undecorated_shadow(false);
+#[derive(Debug)]
+enum UserEvent {
+  #[cfg(target_os = "linux")]
+  GtkClosed,
+}
+
+struct App {
+  #[cfg(not(target_os = "linux"))]
+  window: Option<winit::window::Window>,
+  #[cfg(target_os = "linux")]
+  window: Option<gtk::Window>,
+  webview: Option<WebView>,
+  _proxy: EventLoopProxy<UserEvent>,
+}
+
+impl App {
+  fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
+    Self {
+      window: None,
+      webview: None,
+      _proxy: proxy,
+    }
   }
-  let window = builder.build(&event_loop).unwrap();
+}
 
-  #[cfg(target_os = "windows")]
-  {
-    use tao::platform::windows::WindowExtWindows;
-    window.set_undecorated_shadow(true);
-  }
-
-  let builder = WebViewBuilder::new()
-    // The second is on webview...
-    // Feature `transparent` is required for transparency to work.
-    .with_transparent(true)
-    // And the last is in html.
-    .with_html(
+impl ApplicationHandler<UserEvent> for App {
+  fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
+    let builder = WebViewBuilder::new().with_transparent(true).with_html(
       r#"<html>
-          <body style="background-color:rgba(87,87,87,0.5);"></body>
-          <script>
-            window.onload = function() {
-              document.body.innerText = `hello, ${navigator.userAgent}`;
-            };
-          </script>
-        </html>"#,
+        <body style="background-color: transparent;"></body>
+        <script>
+          window.onload = () => {
+            document.body.innerText = `Hello, ${navigator.userAgent}`;
+            document.body.style.color = "red";
+          };
+        </script>
+      </html>"#,
     );
 
-  #[cfg(any(
-    target_os = "windows",
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "android"
-  ))]
-  let _webview = builder.build(&window)?;
-  #[cfg(not(any(
-    target_os = "windows",
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "android"
-  )))]
-  let _webview = {
-    use tao::platform::unix::WindowExtUnix;
-    use wry::WebViewBuilderExtUnix;
-    let vbox = window.default_vbox().unwrap();
-    builder.build_gtk(vbox)?
-  };
-
-  event_loop.run(move |event, _, control_flow| {
-    *control_flow = ControlFlow::Wait;
-
-    if let Event::WindowEvent {
-      event: WindowEvent::CloseRequested,
-      ..
-    } = event
+    #[cfg(not(target_os = "linux"))]
     {
-      *control_flow = ControlFlow::Exit
+      #[allow(unused_mut)]
+      let mut attributes = winit::window::Window::default_attributes()
+        .with_title("Transparent")
+        .with_transparent(true);
+
+      let window = _event_loop.create_window(attributes).unwrap();
+
+      #[cfg(target_os = "windows")]
+      {
+        use std::num::NonZeroU32;
+
+        let context = softbuffer::Context::new(&window).unwrap();
+        let mut surface = softbuffer::Surface::new(&context, &window).unwrap();
+        let size = window.inner_size();
+        if let (Some(width), Some(height)) =
+          (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+        {
+          surface.resize(width, height).unwrap();
+          let mut buffer = surface.buffer_mut().unwrap();
+          buffer.fill(0x00000000);
+          buffer.present().unwrap();
+          println!("Filled with transparent color");
+        }
+      }
+
+      let webview = builder.build(&window).unwrap();
+
+      self.window = Some(window);
+      self.webview = Some(webview);
     }
-  });
+
+    #[cfg(target_os = "linux")]
+    {
+      let window = gtk::Window::builder()
+        .title("Transparent")
+        .default_width(800)
+        .default_height(600)
+        .css_classes(["bg-transparent"])
+        .build();
+
+      {
+        let proxy = self._proxy.clone();
+        window.connect_close_request(move |_| {
+          let _ = proxy.send_event(UserEvent::GtkClosed);
+          glib::Propagation::Proceed
+        });
+      }
+
+      let webview = builder.build_gtk(&window).unwrap();
+      window.present();
+
+      self.window = Some(window);
+      self.webview = Some(webview);
+    }
+  }
+
+  fn window_event(
+    &mut self,
+    _event_loop: &ActiveEventLoop,
+    _window_id: WindowId,
+    event: WindowEvent,
+  ) {
+    match event {
+      #[cfg(not(target_os = "linux"))]
+      WindowEvent::CloseRequested => {
+        _event_loop.exit();
+      }
+      _ => {}
+    }
+  }
+
+  fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+    match event {
+      #[cfg(target_os = "linux")]
+      UserEvent::GtkClosed => {
+        _event_loop.exit();
+      }
+    }
+  }
+}
+
+fn main() {
+  #[cfg(target_os = "linux")]
+  {
+    gtk::init().unwrap();
+
+    let provider = gtk::CssProvider::new();
+    provider.load_from_string(
+      r#"
+      window.bg-transparent.background {
+        background-color: rgba(0, 0, 0, 0);
+        box-shadow: none;
+      }
+      "#,
+    );
+
+    let display = gdk::Display::default().unwrap();
+    gtk::style_context_add_provider_for_display(
+      &display,
+      &provider,
+      gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+  }
+
+  let event_loop = EventLoop::with_user_event().build().unwrap();
+  let proxy = event_loop.create_proxy();
+  let mut app = App::new(proxy);
+  event_loop.run_app(&mut app).unwrap();
 }

@@ -15,11 +15,8 @@ pub enum Error {
   #[error("Fail to fetch security manager")]
   MissingManager,
   #[cfg(gtk)]
-  #[error("Couldn't find X11 Display")]
-  X11DisplayNotFound,
-  #[cfg(all(gtk, feature = "x11"))]
-  #[error(transparent)]
-  XlibError(#[from] x11_dl::error::OpenError),
+  #[error("Unsupported parent widget type: {0}")]
+  UnsupportedParentWidget(String),
   #[error("Failed to initialize the script")]
   InitScriptError,
   #[error("Bad RPC request: {0} ((1))")]
