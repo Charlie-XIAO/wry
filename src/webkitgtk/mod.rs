@@ -132,7 +132,7 @@ impl InnerWebView {
 
     web_context.register_automation(webview.clone());
 
-    Self::add_to_container(&webview, container, attributes.bounds)?;
+    Self::add_to_container(&webview, container)?;
 
     #[cfg(any(debug_assertions, feature = "devtools"))]
     let is_inspector_open = Self::attach_inspector_handlers(&webview);
@@ -385,7 +385,7 @@ impl InnerWebView {
     }
   }
 
-  fn add_to_container<W>(webview: &WebView, container: &W, bounds: Option<Rect>) -> Result<()>
+  fn add_to_container<W>(webview: &WebView, container: &W) -> Result<()>
   where
     W: IsA<gtk::Widget>,
   {
@@ -395,19 +395,6 @@ impl InnerWebView {
       c.append(webview);
       webview.set_hexpand(true);
       webview.set_vexpand(true);
-    } else if let Some(c) = container.dynamic_cast_ref::<gtk::Fixed>() {
-      let scale_factor = webview.scale_factor() as f64;
-      let (width, height) = bounds
-        .map(|b| b.size.to_logical::<i32>(scale_factor))
-        .map(Into::into)
-        .unwrap_or((1, 1));
-      let (x, y) = bounds
-        .map(|b| b.position.to_logical::<f64>(scale_factor))
-        .map(Into::into)
-        .unwrap_or((0., 0.));
-
-      webview.set_size_request(width, height);
-      c.put(webview, x, y);
     } else {
       return Err(Error::UnsupportedParentWidget(
         container.type_().name().to_string(),
@@ -422,8 +409,6 @@ impl InnerWebView {
       if let Some(p) = parent.dynamic_cast_ref::<gtk::Window>() {
         p.set_child(gtk::Widget::NONE);
       } else if let Some(p) = parent.dynamic_cast_ref::<gtk::Box>() {
-        p.remove(webview);
-      } else if let Some(p) = parent.dynamic_cast_ref::<gtk::Fixed>() {
         p.remove(webview);
       }
     }
@@ -626,7 +611,7 @@ impl InnerWebView {
   }
 
   pub fn set_bounds(&self, _bounds: Rect) -> Result<()> {
-    Err(Error::SetBoundsUnsupported)
+    Ok(()) // Not supported
   }
 
   pub fn set_visible(&self, visible: bool) -> Result<()> {
@@ -830,7 +815,7 @@ impl InnerWebView {
     W: IsA<gtk::Widget>,
   {
     Self::remove_from_parent(&self.webview);
-    Self::add_to_container(&self.webview, container, None)?;
+    Self::add_to_container(&self.webview, container)?;
     Ok(())
   }
 }
