@@ -31,7 +31,7 @@ struct App {
   #[cfg(target_os = "linux")]
   window: Option<gtk::Window>,
   webviews: Option<[WebView; 4]>,
-  proxy: EventLoopProxy<UserEvent>,
+  _proxy: EventLoopProxy<UserEvent>,
 }
 
 impl App {
@@ -39,7 +39,7 @@ impl App {
     Self {
       window: None,
       webviews: None,
-      proxy,
+      _proxy: proxy,
     }
   }
 }
@@ -118,7 +118,7 @@ impl ApplicationHandler<UserEvent> for App {
       window.set_child(Some(&fixed));
 
       {
-        let proxy = self.proxy.clone();
+        let proxy = self._proxy.clone();
         window.connect_close_request(move |_| {
           let _ = proxy.send_event(UserEvent::GtkClosed);
           glib::Propagation::Proceed
@@ -126,7 +126,7 @@ impl ApplicationHandler<UserEvent> for App {
       }
 
       {
-        let proxy = self.proxy.clone();
+        let proxy = self._proxy.clone();
         fixed.connect_resized(move |_, width, height| {
           println!("(width, height) = ({width}, {height})");
           let _ = proxy.send_event(UserEvent::Resize(width, height));
