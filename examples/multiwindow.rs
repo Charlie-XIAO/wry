@@ -84,7 +84,7 @@ impl App {
       let webview = builder.build(&window).unwrap();
 
       let window_id = window.id();
-      self.windows.insert(window_id, (window, webview));
+      self.windows.insert(id, (window, webview));
       self.window_id_map.insert(window_id, id);
     }
 
