@@ -17,6 +17,9 @@ pub enum Error {
   #[cfg(gtk)]
   #[error("Unsupported parent widget type: {0}")]
   UnsupportedParentWidget(String),
+  #[cfg(gtk)]
+  #[error("Setting bounds is not supported, rely on GTK to manage the layout")]
+  SetBoundsUnsupported,
   #[error("Failed to initialize the script")]
   InitScriptError,
   #[error("Bad RPC request: {0} ((1))")]

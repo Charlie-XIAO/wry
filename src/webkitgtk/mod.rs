@@ -40,7 +40,6 @@ pub(crate) struct InnerWebView {
   #[cfg(any(debug_assertions, feature = "devtools"))]
   is_inspector_open: Arc<AtomicBool>,
   pending_scripts: Arc<Mutex<Option<Vec<String>>>>,
-  is_in_fixed_parent: bool,
 }
 
 impl Drop for InnerWebView {
@@ -107,8 +106,6 @@ impl InnerWebView {
 
     let webview = Self::create_webview(web_context, &attributes, &pl_attrs);
 
-    // TODO(Charlie-XIAO): Should we set v/h expand/align here?
-
     // Transparent
     if attributes.transparent {
       webview.set_background_color(&gdk::RGBA::new(0., 0., 0., 0.));
@@ -135,7 +132,7 @@ impl InnerWebView {
 
     web_context.register_automation(webview.clone());
 
-    let is_in_fixed_parent = Self::add_to_container(&webview, container, attributes.bounds)?;
+    Self::add_to_container(&webview, container, attributes.bounds)?;
 
     #[cfg(any(debug_assertions, feature = "devtools"))]
     let is_inspector_open = Self::attach_inspector_handlers(&webview);
@@ -150,7 +147,6 @@ impl InnerWebView {
       id,
       webview,
       pending_scripts: Arc::new(Mutex::new(Some(Vec::new()))),
-      is_in_fixed_parent,
       #[cfg(any(debug_assertions, feature = "devtools"))]
       is_inspector_open,
     };
@@ -389,16 +385,16 @@ impl InnerWebView {
     }
   }
 
-  fn add_to_container<W>(webview: &WebView, container: &W, bounds: Option<Rect>) -> Result<bool>
+  fn add_to_container<W>(webview: &WebView, container: &W, bounds: Option<Rect>) -> Result<()>
   where
     W: IsA<gtk::Widget>,
   {
-    let mut is_in_fixed_parent = false;
-
     if let Some(c) = container.dynamic_cast_ref::<gtk::Window>() {
       c.set_child(Some(webview));
     } else if let Some(c) = container.dynamic_cast_ref::<gtk::Box>() {
       c.append(webview);
+      webview.set_hexpand(true);
+      webview.set_vexpand(true);
     } else if let Some(c) = container.dynamic_cast_ref::<gtk::Fixed>() {
       let scale_factor = webview.scale_factor() as f64;
       let (width, height) = bounds
@@ -412,15 +408,13 @@ impl InnerWebView {
 
       webview.set_size_request(width, height);
       c.put(webview, x, y);
-
-      is_in_fixed_parent = true;
     } else {
       return Err(Error::UnsupportedParentWidget(
         container.type_().name().to_string(),
       ));
     }
 
-    Ok(is_in_fixed_parent)
+    Ok(())
   }
 
   fn remove_from_parent(webview: &WebView) {
@@ -631,21 +625,8 @@ impl InnerWebView {
     })
   }
 
-  pub fn set_bounds(&self, bounds: Rect) -> Result<()> {
-    let scale_factor = self.webview.scale_factor() as f64;
-    let (width, height) = bounds.size.to_logical::<i32>(scale_factor).into();
-    let (x, y) = bounds.position.to_logical::<f64>(scale_factor).into();
-
-    if self.is_in_fixed_parent {
-      if let Some(parent) = self.webview.parent() {
-        if let Some(fixed) = parent.dynamic_cast_ref::<gtk::Fixed>() {
-          fixed.move_(&self.webview, x, y);
-        }
-      }
-      self.webview.set_size_request(width, height);
-    }
-
-    Ok(())
+  pub fn set_bounds(&self, _bounds: Rect) -> Result<()> {
+    Err(Error::SetBoundsUnsupported)
   }
 
   pub fn set_visible(&self, visible: bool) -> Result<()> {
@@ -849,7 +830,7 @@ impl InnerWebView {
     W: IsA<gtk::Widget>,
   {
     Self::remove_from_parent(&self.webview);
-    self.is_in_fixed_parent = Self::add_to_container(&self.webview, container, None)?;
+    Self::add_to_container(&self.webview, container, None)?;
     Ok(())
   }
 }
