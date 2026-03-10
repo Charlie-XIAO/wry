@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 #[cfg(target_os = "linux")]
-use gtk::{glib, prelude::*};
+use gtk::{gdk, glib, prelude::*};
 use winit::{
   application::ApplicationHandler,
   event::WindowEvent,
@@ -92,6 +92,7 @@ impl ApplicationHandler<UserEvent> for App {
         .title("Transparent")
         .default_width(800)
         .default_height(600)
+        .css_classes(["bg-transparent"])
         .build();
 
       {
@@ -137,7 +138,24 @@ impl ApplicationHandler<UserEvent> for App {
 
 fn main() {
   #[cfg(target_os = "linux")]
-  gtk::init().unwrap();
+  {
+    gtk::init().unwrap();
+
+    let provider = gtk::CssProvider::new();
+    provider.load_from_string(
+      r#"window.bg-transparent.background {
+        background-color: rgba(0, 0, 0, 0);
+        box-shadow: none;
+      }"#,
+    );
+
+    let display = gdk::Display::default().unwrap();
+    gtk::style_context_add_provider_for_display(
+      &display,
+      &provider,
+      gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+  }
 
   let event_loop = EventLoop::with_user_event().build().unwrap();
   let proxy = event_loop.create_proxy();
