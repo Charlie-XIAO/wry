@@ -143,10 +143,12 @@ fn main() {
 
     let provider = gtk::CssProvider::new();
     provider.load_from_string(
-      r#"window.bg-transparent.background {
+      r#"
+      window.bg-transparent.background {
         background-color: rgba(0, 0, 0, 0);
         box-shadow: none;
-      }"#,
+      }
+      "#,
     );
 
     let display = gdk::Display::default().unwrap();
