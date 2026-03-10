@@ -83,7 +83,7 @@ fn main() {
       {
         let attributes = winit::window::Window::default_attributes()
           .with_title("Streaming")
-          .with_inner_size(winit::dpi::LogicalSize::new(480., 360.));
+          .with_inner_size(winit::dpi::LogicalSize::new(800., 600.));
         let window = _event_loop.create_window(attributes).unwrap();
         let webview = builder.build(&window).unwrap();
 
@@ -95,8 +95,8 @@ fn main() {
       {
         let window = gtk::Window::builder()
           .title("Streaming")
-          .default_width(480)
-          .default_height(360)
+          .default_width(800)
+          .default_height(600)
           .build();
 
         {
