@@ -14,10 +14,10 @@ use std::{
   sync::{Arc, Mutex},
 };
 use webkit::{
-  prelude::*, soup, AutoplayPolicy, LoadEvent, NavigationAction, NavigationPolicyDecision,
-  NetworkProxyMode, NetworkProxySettings, PolicyDecisionType, PrintOperation, URIRequest,
-  UserContentInjectedFrames, UserContentManager, UserScript, UserScriptInjectionTime, WebView,
-  WebsiteDataTypes, WebsitePolicies,
+  prelude::*, soup, AutoplayPolicy, LoadEvent, NavigationPolicyDecision, NetworkProxyMode,
+  NetworkProxySettings, PolicyDecisionType, PrintOperation, URIRequest, UserContentInjectedFrames,
+  UserContentManager, UserScript, UserScriptInjectionTime, WebView, WebsiteDataTypes,
+  WebsitePolicies,
 };
 
 use web_context::WebContextExt;
@@ -292,8 +292,9 @@ impl InnerWebView {
     // window creation handler
     if let Some(new_window_req_handler) = attributes.new_window_req_handler.take() {
       let related_webviews = Rc::new(Mutex::new(HashMap::new()));
-      web_view_connect_create(webview, move |webview, action| {
-        let url = navigation_action_get_request(action)
+      webview.connect_create(move |webview, action| {
+        let url = action
+          .request()
           .and_then(|request| request.uri())
           .map(|uri| uri.as_str().to_string())?;
         match new_window_req_handler(
@@ -356,7 +357,7 @@ impl InnerWebView {
 
         if let Some(policy) = policy_decision.dynamic_cast_ref::<NavigationPolicyDecision>() {
           if let Some(nav_action) = policy.navigation_action() {
-            if let Some(uri_req) = navigation_action_get_request(&nav_action) {
+            if let Some(uri_req) = nav_action.request() {
               if let Some(uri) = uri_req.uri() {
                 let allow = handler(uri.to_string());
                 if allow {
@@ -827,57 +828,6 @@ pub fn platform_webview_version() -> Result<String> {
     webkit::functions::micro_version(),
   );
   Ok(format!("{major}.{minor}.{patch}"))
-}
-
-// Workaround for https://gitlab.gnome.org/World/Rust/webkit6-rs/-/issues/12
-fn web_view_connect_create<F: Fn(&WebView, &NavigationAction) -> Option<gtk::Widget> + 'static>(
-  webview: &WebView,
-  f: F,
-) -> glib::SignalHandlerId {
-  use glib::translate::*;
-  use std::boxed::Box as Box_;
-  use webkit::ffi;
-
-  unsafe extern "C" fn create_trampoline<
-    P: IsA<WebView>,
-    F: Fn(&P, &NavigationAction) -> Option<gtk::Widget> + 'static,
-  >(
-    this: *mut ffi::WebKitWebView,
-    navigation_action: *mut ffi::WebKitNavigationAction,
-    f: glib::ffi::gpointer,
-  ) -> *mut gtk::ffi::GtkWidget {
-    unsafe {
-      let f: &F = &*(f as *const F);
-      f(
-        WebView::from_glib_borrow(this).unsafe_cast_ref(),
-        &from_glib_borrow(navigation_action),
-      )
-      .to_glib_full()
-    }
-  }
-  unsafe {
-    let f = Box_::new(f);
-    glib::signal::connect_raw(
-      webview.as_ptr() as *mut _,
-      c"create".as_ptr(),
-      Some(std::mem::transmute::<*const (), unsafe extern "C" fn()>(
-        create_trampoline::<WebView, F> as *const (),
-      )),
-      Box_::into_raw(f),
-    )
-  }
-}
-
-// Workaround for https://gitlab.gnome.org/World/Rust/webkit6-rs/-/issues/13
-fn navigation_action_get_request(action: &NavigationAction) -> Option<URIRequest> {
-  use glib::translate::*;
-  use webkit::ffi;
-
-  unsafe {
-    from_glib_none(ffi::webkit_navigation_action_get_request(mut_override(
-      action.to_glib_none().0,
-    )))
-  }
 }
 
 // SAFETY: only use this when you are sure the span will be dropped on the same thread it was entered

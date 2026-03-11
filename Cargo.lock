@@ -2861,9 +2861,9 @@ dependencies = [
 
 [[package]]
 name = "webkit6"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a82701e99db93b7890f1375571219e21dfa2ea2d6c04dc922448c5849a4d662"
+checksum = "4959dd2a92813d4b2ae134e71345a03030bcff189b4f79cd131e9218aba22b70"
 dependencies = [
  "gdk4",
  "gio",
